@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система управления университетом</title>
+    <style>
+        /* Стили для всплывающего окна */
+        .selection-popup {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        
+        .selection-popup h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        
+        .selection-popup p {
+            margin: 5px 0;
+        }
+        
+        .highlight {
+            background-color: yellow;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Система управления университетом</h1>
+        
+        <!-- Таблица высших школ -->
+        <h2>Высшие школы</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Наименование</th>
+                    <th>Сокращение</th>
+                    <th>Примечание</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>1</td>
+                    <td><span class="school-name">Инженерная школа цифровых технологий</span></td>
+                    <td>ИЩЦТ</td>
+                    <td>..</td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td><span class="school-name">Высшая школа гуманитарных наук</span></td>
+                    <td>ВШГН</td>
+                    <td>..</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const schoolNameElement = document.querySelector('.school-name');
+            
+            // Обработчик выделения текста
+            schoolNameElement.addEventListener('mouseup', function(e) {
+                const selection = window.getSelection();
+                const selectedText = selection.toString().trim();
+                
+                if (selectedText === "Инженерная школа цифровых технологий") {
+                    showSchoolInfoPopup(e);
+                }
+            });
+            
+            // Функция показа всплывающего окна с информацией о школе
+            function showSchoolInfoPopup(event) {
+                // Удаляем предыдущее всплывающее окно, если оно есть
+                const existingPopup = document.querySelector('.selection-popup');
+                if (existingPopup) {
+                    existingPopup.remove();
+                }
+                
+                // Создаем новое всплывающее окно
+                const popup = document.createElement('div');
+                popup.className = 'selection-popup';
+                popup.innerHTML = `
+                    <h3>Инженерная школа цифровых технологий</h3>
+                    <p><strong>ID:</strong> 1</p>
+                    <p><strong>Сокращение:</strong> ИЩЦТ</p>
+                    <p><strong>Примечание:</strong> Школа занимается подготовкой специалистов в области цифровых технологий</p>
+                    <p><strong>Программы:</strong> Компьютерные науки, Искусственный интеллект, Кибербезопасность</p>
+                `;
+                
+                // Позиционируем всплывающее окно рядом с выделенным текстом
+                const rect = event.target.getBoundingClientRect();
+                popup.style.position = 'absolute';
+                popup.style.left = `${rect.left + window.scrollX}px`;
+                popup.style.top = `${rect.bottom + window.scrollY}px`;
+                
+                document.body.appendChild(popup);
+                
+                // Закрываем всплывающее окно при клике вне его
+                document.addEventListener('click', function closePopup(e) {
+                    if (!popup.contains(e.target)) {
+                        popup.remove();
+                        document.removeEventListener('click', closePopup);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
