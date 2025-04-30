@@ -3,8 +3,8 @@
 -- https://www.phpmyadmin.net/
 --
 -- Хост: 127.0.0.1:3306
--- Время создания: Апр 25 2025 г., 11:28
--- Версия сервера: 8.0.30
+-- Время создания: Апр 29 2025 г., 11:37
+-- Версия сервера: 5.7.39
 -- Версия PHP: 7.2.34
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
@@ -28,12 +28,12 @@ SET time_zone = "+00:00";
 --
 
 CREATE TABLE `categories` (
-  `id` int NOT NULL,
-  `number` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `category_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `category_short` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `documents_list` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `payment_frequency` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` int(11) NOT NULL,
+  `number` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category_short` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `documents_list` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `payment_frequency` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `max_amount` decimal(10,2) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -81,11 +81,11 @@ INSERT INTO `categories` (`id`, `number`, `category_name`, `category_short`, `do
 --
 
 CREATE TABLE `Directions` (
-  `code` int NOT NULL,
-  `vsh_code` int NOT NULL,
-  `direction_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `level` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `code` int(11) NOT NULL,
+  `vsh_code` int(11) DEFAULT NULL,
+  `direction_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `level` enum('Бакалавриат','Магистратура','Аспирантура') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --
@@ -96,7 +96,6 @@ INSERT INTO `Directions` (`code`, `vsh_code`, `direction_name`, `level`, `notes`
 (1, 1, '09.03.01 Информатика и вычислительная техника', 'Бакалавриат', ''),
 (2, 1, '09.03.04 Программная инженерия', 'Бакалавриат', ''),
 (3, 1, '10.03.01 Информационная безопасность', 'Бакалавриат', ''),
-(4, 1, '01.04.02 Прикладная математика и информатика', 'Магистратура', ''),
 (5, 2, '42.03.02 Журналистика', 'Бакалавриат', ''),
 (6, 2, '45.03.01 Филология', 'Бакалавриат', ''),
 (7, 2, '45.03.02 Лингвистика', 'Бакалавриат', ''),
@@ -141,24 +140,27 @@ INSERT INTO `Directions` (`code`, `vsh_code`, `direction_name`, `level`, `notes`
 --
 
 CREATE TABLE `Groups` (
-  `id` int NOT NULL,
-  `direction_id` int DEFAULT NULL,
-  `group_name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `id` int(11) NOT NULL,
+  `direction_id` int(11) DEFAULT NULL,
+  `group_name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --
 -- Дамп данных таблицы `Groups`
 --
 
-INSERT INTO `Groups` (`id`, `direction_id`, `group_name`, `notes`) VALUES
-(1, 2, '1521б', ''),
-(2, 1, '1121б', ''),
-(3, 1, 'ИВТ31б', ''),
-(4, 2, 'ПИ31б', ''),
-(5, 3, 'ИБ31б', ''),
-(6, 1, 'ИВТ41б', ''),
-(7, 2, 'ПИ41б', '');
+INSERT INTO `Groups` (`id`, `direction_id`, `group_name`, `notes`, `updated_at`) VALUES
+(1, 2, '1521б', '', '2025-04-29 05:44:57'),
+(2, 1, '1121б', '', '2025-04-29 05:44:57'),
+(3, 1, 'ИВТ31б', '', '2025-04-29 05:44:57'),
+(4, 2, 'ПИ31б', '', '2025-04-29 05:44:57'),
+(5, 3, 'ИБ31б', '', '2025-04-29 05:44:57'),
+(6, 1, 'ИВТ41б', '', '2025-04-29 05:44:57'),
+(7, 2, 'ПИ41б', '', '2025-04-29 05:44:57'),
+(8, 3, 'ИБ41б', '', '2025-04-29 05:44:57'),
+(9, 3, 'ИБ42б', '', '2025-04-29 05:44:57');
 
 -- --------------------------------------------------------
 
@@ -167,10 +169,10 @@ INSERT INTO `Groups` (`id`, `direction_id`, `group_name`, `notes`) VALUES
 --
 
 CREATE TABLE `Schools` (
-  `code` int NOT NULL,
-  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `abbreviation` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `code` int(11) NOT NULL,
+  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `abbreviation` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --
@@ -195,15 +197,30 @@ INSERT INTO `Schools` (`code`, `name`, `abbreviation`, `notes`) VALUES
 --
 
 CREATE TABLE `Students` (
-  `id` int NOT NULL,
-  `group_id` int DEFAULT NULL,
-  `full_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `contacts` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL
+  `id` int(11) NOT NULL,
+  `group_id` int(11) NOT NULL,
+  `full_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `phone` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `telegram` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Дамп данных таблицы `Students`
+--
+
+INSERT INTO `Students` (`id`, `group_id`, `full_name`, `phone`, `telegram`, `updated_at`) VALUES
+
 
 --
 -- Индексы сохранённых таблиц
 --
+
+--
+-- Индексы таблицы `categories`
+--
+ALTER TABLE `categories`
+  ADD PRIMARY KEY (`id`);
 
 --
 -- Индексы таблицы `Directions`
@@ -230,35 +247,41 @@ ALTER TABLE `Schools`
 --
 ALTER TABLE `Students`
   ADD PRIMARY KEY (`id`),
-  ADD KEY `students_ibfk_1` (`group_id`);
+  ADD KEY `group_id` (`group_id`);
 
 --
 -- AUTO_INCREMENT для сохранённых таблиц
 --
 
 --
+-- AUTO_INCREMENT для таблицы `categories`
+--
+ALTER TABLE `categories`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=32;
+
+--
 -- AUTO_INCREMENT для таблицы `Directions`
 --
 ALTER TABLE `Directions`
-  MODIFY `code` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=41;
+  MODIFY `code` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=61;
 
 --
 -- AUTO_INCREMENT для таблицы `Groups`
 --
 ALTER TABLE `Groups`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
 
 --
 -- AUTO_INCREMENT для таблицы `Schools`
 --
 ALTER TABLE `Schools`
-  MODIFY `code` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+  MODIFY `code` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=25;
 
 --
 -- AUTO_INCREMENT для таблицы `Students`
 --
 ALTER TABLE `Students`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=246;
 
 --
 -- Ограничения внешнего ключа сохраненных таблиц
@@ -268,13 +291,13 @@ ALTER TABLE `Students`
 -- Ограничения внешнего ключа таблицы `Directions`
 --
 ALTER TABLE `Directions`
-  ADD CONSTRAINT `directions_ibfk_1` FOREIGN KEY (`vsh_code`) REFERENCES `Schools` (`code`);
+  ADD CONSTRAINT `directions_ibfk_1` FOREIGN KEY (`vsh_code`) REFERENCES `Schools` (`code`) ON DELETE CASCADE;
 
 --
 -- Ограничения внешнего ключа таблицы `Groups`
 --
 ALTER TABLE `Groups`
-  ADD CONSTRAINT `groups_ibfk_1` FOREIGN KEY (`direction_id`) REFERENCES `Directions` (`code`);
+  ADD CONSTRAINT `groups_ibfk_1` FOREIGN KEY (`direction_id`) REFERENCES `Directions` (`code`) ON DELETE CASCADE;
 
 --
 -- Ограничения внешнего ключа таблицы `Students`

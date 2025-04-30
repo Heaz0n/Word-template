@@ -23,23 +23,30 @@ try {
 
 // Функция для обработки действий со школами
 function handleSchoolAction($pdo, $action, $data) {
-    $name = trim($data['name']);
+    $name = trim($data['name'] ?? '');
     $abbreviation = trim($data['abbreviation'] ?? '');
     $notes = trim($data['notes'] ?? '');
 
+    // Валидация
     if (empty($name)) {
-        return ['type' => 'error', 'message' => 'Наименование школы не может быть пустым'];
+        return ['type' => 'error', 'message' => 'Наименование школы обязательно'];
+    }
+    if (strlen($name) > 255) {
+        return ['type' => 'error', 'message' => 'Наименование школы не должно превышать 255 символов'];
+    }
+    if ($abbreviation && strlen($abbreviation) > 50) {
+        return ['type' => 'error', 'message' => 'Сокращение не должно превышать 50 символов'];
     }
 
     try {
         if ($action === 'add_school') {
             $stmt = $pdo->prepare("INSERT INTO Schools (name, abbreviation, notes) VALUES (?, ?, ?)");
-            $stmt->execute([$name, $abbreviation, $notes]);
+            $stmt->execute([$name, $abbreviation ?: null, $notes ?: null]);
             return ['type' => 'success', 'message' => "Школа '$name' успешно добавлена"];
         } elseif ($action === 'edit_school') {
             $code = $data['code'];
             $stmt = $pdo->prepare("UPDATE Schools SET name = ?, abbreviation = ?, notes = ? WHERE code = ?");
-            $stmt->execute([$name, $abbreviation, $notes, $code]);
+            $stmt->execute([$name, $abbreviation ?: null, $notes ?: null, $code]);
             return ['type' => 'success', 'message' => "Школа '$name' успешно обновлена"];
         }
     } catch (PDOException $e) {
@@ -53,34 +60,56 @@ function handleSchoolAction($pdo, $action, $data) {
 
 // Функция для обработки действий с направлениями
 function handleDirectionAction($pdo, $action, $data) {
-    $vsh_code = trim($data['vsh_code']);
-    $direction_name = trim($data['direction_name']);
-    $level = trim($data['level']);
+    $vsh_code = trim($data['vsh_code'] ?? '');
+    $direction_name = trim($data['direction_name'] ?? '');
+    $level = trim($data['level'] ?? '');
     $notes = trim($data['notes'] ?? '');
 
-    if (empty($vsh_code) || empty($direction_name) || empty($level)) {
-        return ['type' => 'error', 'message' => 'Все обязательные поля должны быть заполнены'];
+    // Отладка: логируем полученное значение vsh_code
+    error_log("handleDirectionAction: action = '$action', vsh_code = '$vsh_code', level = '$level', raw POST: " . print_r($data, true));
+
+    // Валидация
+    if (empty($direction_name)) {
+        return ['type' => 'error', 'message' => 'Наименование направления обязательно'];
+    }
+    if (strlen($direction_name) > 255) {
+        return ['type' => 'error', 'message' => 'Наименование направления не должно превышать 255 символов'];
+    }
+    if ($level && !in_array($level, ['Бакалавриат', 'Магистратура', 'Аспирантура'])) {
+        return ['type' => 'error', 'message' => 'Недопустимый уровень направления'];
+    }
+    if (empty($vsh_code)) {
+        error_log("handleDirectionAction: vsh_code is empty");
+        return ['type' => 'error', 'message' => 'Выбор школы обязателен'];
     }
 
     // Проверка существования школы
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM Schools WHERE code = ?");
-    $stmt->execute([$vsh_code]);
-    if ($stmt->fetchColumn() == 0) {
-        return ['type' => 'error', 'message' => 'Выбранная школа не существует'];
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM Schools WHERE code = ?");
+        $stmt->execute([$vsh_code]);
+        $schoolExists = $stmt->fetchColumn();
+        error_log("handleDirectionAction: schoolExists for vsh_code '$vsh_code' = $schoolExists");
+        if ($schoolExists == 0) {
+            return ['type' => 'error', 'message' => "Школа с кодом '$vsh_code' не существует"];
+        }
+    } catch (PDOException $e) {
+        error_log("handleDirectionAction: Database error while checking school: " . $e->getMessage());
+        return ['type' => 'error', 'message' => 'Ошибка проверки школы: ' . $e->getMessage()];
     }
 
     try {
         if ($action === 'add_direction') {
             $stmt = $pdo->prepare("INSERT INTO Directions (vsh_code, direction_name, level, notes) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$vsh_code, $direction_name, $level, $notes]);
+            $stmt->execute([$vsh_code, $direction_name, $level ?: null, $notes ?: null]);
             return ['type' => 'success', 'message' => "Направление '$direction_name' успешно добавлено"];
         } elseif ($action === 'edit_direction') {
             $code = $data['code'];
-            $stmt = $pdo->prepare("UPDATE Directions SET vsh_code = ?, direction_name = ?, level = ?, notes = ? WHERE code = ?");
-            $stmt->execute([$vsh_code, $direction_name, $level, $notes, $code]);
+            $stmt = $pdo->prepare("UPDATE Directions SET direction_name = ?, level = ?, notes = ? WHERE code = ?");
+            $stmt->execute([$direction_name, $level ?: null, $notes ?: null, $code]);
             return ['type' => 'success', 'message' => "Направление '$direction_name' успешно обновлено"];
         }
     } catch (PDOException $e) {
+        error_log("handleDirectionAction: Database error: " . $e->getMessage());
         if ($e->getCode() == '23000') {
             return ['type' => 'error', 'message' => "Направление '$direction_name' уже существует для выбранной школы"];
         }
@@ -91,6 +120,9 @@ function handleDirectionAction($pdo, $action, $data) {
 
 // Обработка действий
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    // Отладка: логируем весь POST-запрос
+    error_log("POST data: " . print_r($_POST, true));
+
     // Проверка CSRF-токена
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
         $_SESSION['notification'] = ['type' => 'error', 'message' => 'Недействительный CSRF-токен'];
@@ -107,76 +139,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } elseif ($action === 'delete_school') {
         $code = $_POST['code'];
         try {
-            // Проверка связанных направлений
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM Directions WHERE vsh_code = ?");
+            $pdo->beginTransaction();
+
+            // Проверка связанных групп
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` WHERE direction_id IN (SELECT code FROM Directions WHERE vsh_code = ?)");
             $stmt->execute([$code]);
             if ($stmt->fetchColumn() > 0) {
-                $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить школу, так как она связана с направлениями'];
+                $pdo->rollBack();
+                $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить школу, так как она связана с группами'];
             } else {
-                // Проверка связанных групп (если таблица существует)
-                try {
-                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` g JOIN Directions d ON g.direction_id = d.code WHERE d.vsh_code = ?");
-                    $stmt->execute([$code]);
-                    if ($stmt->fetchColumn() > 0) {
-                        $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить школу, так как она связана с группами'];
-                    } else {
-                        $stmt = $pdo->prepare("SELECT name FROM Schools WHERE code = ?");
-                        $stmt->execute([$code]);
-                        $schoolName = $stmt->fetchColumn();
+                // Получение имени школы для уведомления
+                $stmt = $pdo->prepare("SELECT name FROM Schools WHERE code = ?");
+                $stmt->execute([$code]);
+                $schoolName = $stmt->fetchColumn();
 
-                        $stmt = $pdo->prepare("DELETE FROM Schools WHERE code = ?");
-                        $stmt->execute([$code]);
-                        $_SESSION['notification'] = ['type' => 'success', 'message' => "Школа '$schoolName' успешно удалена"];
-                    }
-                } catch (PDOException $e) {
-                    // Если таблицы Groups нет, пропускаем проверку
-                    if (stripos($e->getMessage(), 'table') !== false && stripos($e->getMessage(), 'doesn\'t exist') !== false) {
-                        $stmt = $pdo->prepare("SELECT name FROM Schools WHERE code = ?");
-                        $stmt->execute([$code]);
-                        $schoolName = $stmt->fetchColumn();
+                // Удаление всех направлений, связанных с этой школой
+                error_log("Deleting directions for school code: $code");
+                $stmt = $pdo->prepare("DELETE FROM Directions WHERE vsh_code = ?");
+                $stmt->execute([$code]);
 
-                        $stmt = $pdo->prepare("DELETE FROM Schools WHERE code = ?");
-                        $stmt->execute([$code]);
-                        $_SESSION['notification'] = ['type' => 'success', 'message' => "Школа '$schoolName' успешно удалена"];
-                    } else {
-                        throw $e;
-                    }
-                }
+                // Удаление школы
+                error_log("Deleting school with code: $code");
+                $stmt = $pdo->prepare("DELETE FROM Schools WHERE code = ?");
+                $stmt->execute([$code]);
+
+                $pdo->commit();
+                $_SESSION['notification'] = ['type' => 'success', 'message' => "Школа '$schoolName' и связанные направления успешно удалены"];
             }
         } catch (PDOException $e) {
+            $pdo->rollBack();
             $_SESSION['notification'] = ['type' => 'error', 'message' => 'Ошибка при удалении школы: ' . $e->getMessage()];
         }
     } elseif ($action === 'delete_direction') {
         $code = $_POST['code'];
         try {
             // Проверка связанных групп
-            try {
-                $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` WHERE direction_id = ?");
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` WHERE direction_id = ?");
+            $stmt->execute([$code]);
+            if ($stmt->fetchColumn() > 0) {
+                $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить направление, так как оно связано с группами'];
+            } else {
+                $stmt = $pdo->prepare("SELECT direction_name FROM Directions WHERE code = ?");
                 $stmt->execute([$code]);
-                if ($stmt->fetchColumn() > 0) {
-                    $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить направление, так как оно связано с группами'];
-                } else {
-                    $stmt = $pdo->prepare("SELECT direction_name FROM Directions WHERE code = ?");
-                    $stmt->execute([$code]);
-                    $directionName = $stmt->fetchColumn();
+                $directionName = $stmt->fetchColumn();
 
-                    $stmt = $pdo->prepare("DELETE FROM Directions WHERE code = ?");
-                    $stmt->execute([$code]);
-                    $_SESSION['notification'] = ['type' => 'success', 'message' => "Направление '$directionName' успешно удалено"];
-                }
-            } catch (PDOException $e) {
-                // Если таблицы Groups нет, пропускаем проверку
-                if (stripos($e->getMessage(), 'table') !== false && stripos($e->getMessage(), 'doesn\'t exist') !== false) {
-                    $stmt = $pdo->prepare("SELECT direction_name FROM Directions WHERE code = ?");
-                    $stmt->execute([$code]);
-                    $directionName = $stmt->fetchColumn();
-
-                    $stmt = $pdo->prepare("DELETE FROM Directions WHERE code = ?");
-                    $stmt->execute([$code]);
-                    $_SESSION['notification'] = ['type' => 'success', 'message' => "Направление '$directionName' успешно удалено"];
-                } else {
-                    throw $e;
-                }
+                $stmt = $pdo->prepare("DELETE FROM Directions WHERE code = ?");
+                $stmt->execute([$code]);
+                $_SESSION['notification'] = ['type' => 'success', 'message' => "Направление '$directionName' успешно удалено"];
             }
         } catch (PDOException $e) {
             $_SESSION['notification'] = ['type' => 'error', 'message' => 'Ошибка при удалении направления: ' . $e->getMessage()];
@@ -220,7 +229,8 @@ foreach ($results as $row) {
             'code' => $row['direction_code'],
             'direction_name' => $row['direction_name'],
             'level' => $row['level'],
-            'notes' => $row['direction_notes']
+            'notes' => $row['direction_notes'],
+            'vsh_code' => $row['vsh_code']
         ];
         $directions[] = [
             'code' => $row['direction_code'],
@@ -256,7 +266,6 @@ foreach ($results as $row) {
             line-height: 1.6;
         }
 
-        /* Стили для шапки */
         header {
             position: fixed;
             top: 0;
@@ -306,7 +315,6 @@ foreach ($results as $row) {
             cursor: pointer;
         }
 
-        /* Основной контейнер */
         .container {
             max-width: 1280px;
             margin: 80px auto 30px;
@@ -337,7 +345,6 @@ foreach ($results as $row) {
             border-bottom: 1px solid #ddd;
         }
 
-        /* Таблицы */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -366,7 +373,6 @@ foreach ($results as $row) {
             background-color: #f1f5f9;
         }
 
-        /* Кнопки */
         button {
             padding: 8px 12px;
             border: none;
@@ -417,7 +423,6 @@ foreach ($results as $row) {
             gap: 8px;
         }
 
-        /* Модальные окна */
         .modal {
             display: none;
             position: fixed;
@@ -459,7 +464,6 @@ foreach ($results as $row) {
             color: #d32f2f;
         }
 
-        /* Формы */
         form label {
             display: block;
             margin: 10px 0 5px;
@@ -489,13 +493,12 @@ foreach ($results as $row) {
             min-height: 100px;
         }
 
-        form select:disabled {
+        form select.readonly {
             background-color: #e0e0e0;
             cursor: not-allowed;
             opacity: 0.7;
         }
 
-        /* Выпадающий список фильтра */
         .filter-select {
             padding: 8px;
             font-size: 14px;
@@ -511,7 +514,6 @@ foreach ($results as $row) {
             outline: none;
         }
 
-        /* Уведомления */
         .notification-container {
             position: fixed;
             top: 20px;
@@ -550,7 +552,6 @@ foreach ($results as $row) {
             font-size: 16px;
         }
 
-        /* Ссылки */
         .clickable-name {
             cursor: pointer;
             color: #000000;
@@ -563,18 +564,11 @@ foreach ($results as $row) {
             text-decoration: underline;
         }
 
-        /* Анимации */
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
         }
 
-        @keyframes slideIn {
-            from { transform: translateY(-30px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-
-        /* Адаптивность */
         @media (max-width: 768px) {
             .container {
                 padding: 15px;
@@ -660,7 +654,14 @@ foreach ($results as $row) {
     </style>
 </head>
 <body>
-    <?php include 'header.html'; ?>
+    <?php
+    // Безопасное включение header.html
+    if (file_exists('header.html')) {
+        include 'header.html';
+    } else {
+        echo '<header><nav><ul><li><a href="schools.php">Главная</a></li></ul></nav></header>';
+    }
+    ?>
 
     <div class="notification-container">
         <?php if (isset($_SESSION['notification'])): ?>
@@ -697,14 +698,14 @@ foreach ($results as $row) {
                         <td><?= htmlspecialchars($school['code']) ?></td>
                         <td>
                             <span class="clickable-name" data-school='<?= htmlspecialchars(json_encode($school)) ?>'>
-                                <?= htmlspecialchars($school['name']) ?>
+                                <?= htmlspecialchars($school['name'] ?? '') ?>
                             </span>
                         </td>
                         <td><?= htmlspecialchars($school['abbreviation'] ?? '') ?></td>
                         <td><?= htmlspecialchars($school['notes'] ?? '') ?></td>
                         <td>
                             <div class="actions">
-                                <button class="edit-button" onclick="openEditSchoolModal('<?= addslashes($school['code']) ?>', '<?= addslashes($school['name']) ?>', '<?= addslashes($school['abbreviation'] ?? '') ?>', '<?= addslashes($school['notes'] ?? '') ?>')"><i class="fas fa-pen"></i></button>
+                                <button class="edit-button" onclick="openEditSchoolModal('<?= addslashes($school['code']) ?>', '<?= addslashes($school['name'] ?? '') ?>', '<?= addslashes($school['abbreviation'] ?? '') ?>', '<?= addslashes($school['notes'] ?? '') ?>')"><i class="fas fa-pen"></i></button>
                                 <button class="delete-button" onclick="confirmDeleteSchool('<?= addslashes($school['code']) ?>')"><i class="fas fa-trash-can"></i></button>
                             </div>
                         </td>
@@ -720,7 +721,7 @@ foreach ($results as $row) {
                     <option value="">Все школы</option>
                     <?php foreach ($schools as $school): ?>
                         <option value="<?= htmlspecialchars($school['code']) ?>">
-                            <?= htmlspecialchars($school['code'] . ' - ' . $school['name']) ?>
+                            <?= htmlspecialchars($school['code'] . ' - ' . ($school['name'] ?? '')) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -745,14 +746,14 @@ foreach ($results as $row) {
                         <td><?= htmlspecialchars($direction['vsh_code']) ?></td>
                         <td>
                             <span class="clickable-name" data-direction='<?= htmlspecialchars(json_encode($direction)) ?>'>
-                                <?= htmlspecialchars($direction['direction_name']) ?>
+                                <?= htmlspecialchars($direction['direction_name'] ?? '') ?>
                             </span>
                         </td>
-                        <td><?= htmlspecialchars($direction['level']) ?></td>
+                        <td><?= htmlspecialchars($direction['level'] ?? '') ?></td>
                         <td><?= htmlspecialchars($direction['notes'] ?? '') ?></td>
                         <td>
                             <div class="actions">
-                                <button class="edit-button" onclick="openEditDirectionModal('<?= addslashes($direction['code']) ?>', '<?= addslashes($direction['vsh_code']) ?>', '<?= addslashes($direction['direction_name']) ?>', '<?= addslashes($direction['level']) ?>', '<?= addslashes($direction['notes'] ?? '') ?>')"><i class="fas fa-pen"></i></button>
+                                <button class="edit-button" onclick="openEditDirectionModal('<?= addslashes($direction['code']) ?>', '<?= addslashes($direction['vsh_code']) ?>', '<?= addslashes($direction['direction_name'] ?? '') ?>', '<?= addslashes($direction['level'] ?? '') ?>', '<?= addslashes($direction['notes'] ?? '') ?>')"><i class="fas fa-pen"></i></button>
                                 <button class="delete-button" onclick="confirmDeleteDirection('<?= addslashes($direction['code']) ?>')"><i class="fas fa-trash-can"></i></button>
                             </div>
                         </td>
@@ -808,17 +809,22 @@ foreach ($results as $row) {
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                 <label for="vsh_code">Школа:</label>
                 <select id="vsh_code" name="vsh_code" required>
-                    <option value="">Выберите школу</option>
+                    <option value="" disabled selected>Выберите школу</option>
                     <?php foreach ($schools as $school): ?>
                         <option value="<?= htmlspecialchars($school['code']) ?>">
-                            <?= htmlspecialchars($school['code'] . ' - ' . $school['name']) ?>
+                            <?= htmlspecialchars($school['code'] . ' - ' . ($school['name'] ?? '')) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
                 <label for="direction_name">Наименование:</label>
                 <input type="text" id="direction_name" name="direction_name" placeholder="Введите наименование направления" required>
                 <label for="level">Уровень:</label>
-                <input type="text" id="level" name="level" placeholder="Введите уровень направления (например, Бакалавриат, Магистратура)" required>
+                <select id="level" name="level">
+                    <option value="" selected>Выберите уровень</option>
+                    <option value="Бакалавриат">Бакалавриат</option>
+                    <option value="Магистратура">Магистратура</option>
+                    <option value="Аспирантура">Аспирантура</option>
+                </select>
                 <label for="notes">Примечание:</label>
                 <textarea id="notes" name="notes" placeholder="Введите дополнительную информацию"></textarea>
                 <button type="submit" class="add-button"><i class="fas fa-circle-plus"></i> Добавить</button>
@@ -834,19 +840,24 @@ foreach ($results as $row) {
                 <input type="hidden" name="action" value="edit_direction">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                 <input type="hidden" id="edit-direction-code" name="code">
-                <label for="edit-direction-vsh-code">Школа:</label>
-                <select id="edit-direction-vsh-code" name="vsh_code" required>
-                    <option value="">Выберите школу</option>
+                <label for="edit_vsh_code">Школа:</label>
+                <select id="edit_vsh_code" name="vsh_code" required>
+                    <option value="" disabled>Выберите школу</option>
                     <?php foreach ($schools as $school): ?>
                         <option value="<?= htmlspecialchars($school['code']) ?>">
-                            <?= htmlspecialchars($school['code'] . ' - ' . $school['name']) ?>
+                            <?= htmlspecialchars($school['code'] . ' - ' . ($school['name'] ?? '')) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
                 <label for="edit-direction-name">Наименование:</label>
                 <input type="text" id="edit-direction-name" name="direction_name" placeholder="Введите наименование направления" required>
                 <label for="edit-direction-level">Уровень:</label>
-                <input type="text" id="edit-direction-level" name="level" placeholder="Введите уровень направления (например, Бакалавриат)" required>
+                <select id="edit-direction-level" name="level">
+                    <option value="" selected>Выберите уровень</option>
+                    <option value="Бакалавриат">Бакалавриат</option>
+                    <option value="Магистратура">Магистратура</option>
+                    <option value="Аспирантура">Аспирантура</option>
+                </select>
                 <label for="edit-direction-notes">Примечание:</label>
                 <textarea id="edit-direction-notes" name="notes" placeholder="Введите дополнительную информацию"></textarea>
                 <button type="submit" class="save-button"><i class="fas fa-floppy-disk"></i> Сохранить</button>
@@ -855,12 +866,13 @@ foreach ($results as $row) {
     </div>
 
     <script>
-        // Переменная для хранения текущего выбранного кода школы
         let currentSchoolCode = null;
 
         function toggleMenu() {
             const menu = document.getElementById('nav-menu');
-            menu.classList.toggle('active');
+            if (menu) {
+                menu.classList.toggle('active');
+            }
         }
 
         function showNotification(message, type = 'success') {
@@ -893,7 +905,6 @@ foreach ($results as $row) {
             if (modal) {
                 modal.style.display = 'none';
             }
-            // Сбрасываем текущий код школы при закрытии модального окна
             currentSchoolCode = null;
         }
 
@@ -902,22 +913,31 @@ foreach ($results as $row) {
                 const modal = document.getElementById('add-direction-modal');
                 const vshCodeSelect = document.getElementById('vsh_code');
                 const directionNameInput = document.getElementById('direction_name');
-                const levelInput = document.getElementById('level');
+                const levelSelect = document.getElementById('level');
                 const notesInput = document.getElementById('notes');
 
-                // Установить школу из фильтра, не изменяя сам фильтр
                 const schoolFilter = document.getElementById('school-filter');
                 const selectedSchoolCode = schoolFilter.value;
 
-                vshCodeSelect.value = selectedSchoolCode || '';
-                vshCodeSelect.disabled = !!selectedSchoolCode; // Заблокировать, если школа выбрана
+                // Очищаем поля формы
                 directionNameInput.value = '';
-                levelInput.value = '';
+                levelSelect.value = '';
                 notesInput.value = '';
+
+                // Если выбрана школа в фильтре, подставляем её
+                if (selectedSchoolCode) {
+                    vshCodeSelect.value = selectedSchoolCode;
+                    vshCodeSelect.classList.add('readonly');
+                    vshCodeSelect.onchange = (e) => e.preventDefault();
+                } else {
+                    vshCodeSelect.value = '';
+                    vshCodeSelect.classList.remove('readonly');
+                    vshCodeSelect.onchange = null;
+                }
 
                 openModal('add-direction-modal');
             } catch (error) {
-                showNotification('Ошибка при открытии формы добавления направления', 'error');
+                showNotification('Ошибка при открытии формы добавления направления: ' + error.message, 'error');
             }
         }
 
@@ -926,12 +946,10 @@ foreach ($results as $row) {
                 try {
                     const schoolData = JSON.parse(event.target.getAttribute('data-school'));
                     if (schoolData) {
-                        // Обновляем фильтр направлений и блокируем его
                         const schoolFilter = document.getElementById('school-filter');
                         schoolFilter.value = schoolData.code || '';
-                        schoolFilter.disabled = true; // Блокируем фильтр
+                        schoolFilter.disabled = true;
                         currentSchoolCode = schoolData.code;
-                        // Сохраняем значение фильтра в sessionStorage
                         sessionStorage.setItem('schoolFilterValue', schoolFilter.value);
                         filterDirections();
                     }
@@ -965,24 +983,24 @@ foreach ($results as $row) {
                     showNotification('Модальное окно редактирования направления не найдено', 'error');
                     return;
                 }
-                const vshCodeSelect = document.getElementById('edit-direction-vsh-code');
                 document.getElementById('edit-direction-code').value = code || '';
-                vshCodeSelect.value = vsh_code || '';
+                document.getElementById('edit_vsh_code').value = vsh_code || '';
                 document.getElementById('edit-direction-name').value = direction_name || '';
                 document.getElementById('edit-direction-level').value = level || '';
                 document.getElementById('edit-direction-notes').value = notes || '';
 
-                // Заблокировать выбор школы, если есть текущий контекст
-                vshCodeSelect.disabled = !!currentSchoolCode;
+                const editVshCodeSelect = document.getElementById('edit_vsh_code');
+                editVshCodeSelect.classList.add('readonly');
+                editVshCodeSelect.onchange = (e) => e.preventDefault();
 
                 openModal('edit-direction-modal');
             } catch (error) {
-                showNotification('Ошибка при открытии формы редактирования направления', 'error');
+                showNotification('Ошибка при открытии формы редактирования направления: ' + error.message, 'error');
             }
         }
 
         function confirmDeleteSchool(code) {
-            if (confirm('Вы уверены, что хотите удалить эту школу?')) {
+            if (confirm('Вы уверены, что хотите удалить эту школу? Все связанные направления также будут удалены.')) {
                 const form = document.createElement('form');
                 form.method = 'POST';
                 form.innerHTML = `
@@ -1020,6 +1038,11 @@ foreach ($results as $row) {
                     showNotification('Наименование школы не должно превышать 255 символов', 'error');
                     return false;
                 }
+                const abbreviationInput = document.getElementById('abbreviation')?.value.trim() || document.getElementById('edit-school-abbreviation')?.value.trim();
+                if (abbreviationInput && abbreviationInput.length > 50) {
+                    showNotification('Сокращение не должно превышать 50 символов', 'error');
+                    return false;
+                }
                 return true;
             } catch (error) {
                 showNotification('Ошибка при валидации формы школы', 'error');
@@ -1029,46 +1052,43 @@ foreach ($results as $row) {
 
         function validateDirectionForm() {
             try {
-                const vshCodeSelect = document.getElementById('vsh_code')?.value.trim() || document.getElementById('edit-direction-vsh-code')?.value.trim();
                 const directionInput = document.getElementById('direction_name')?.value.trim() || document.getElementById('edit-direction-name')?.value.trim();
+                const vshCodeInput = document.getElementById('vsh_code')?.value.trim() || document.getElementById('edit_vsh_code')?.value.trim();
                 const levelInput = document.getElementById('level')?.value.trim() || document.getElementById('edit-direction-level')?.value.trim();
-                if (!vshCodeSelect) {
-                    showNotification('Школа обязательна', 'error');
-                    return false;
-                }
+
                 if (!directionInput) {
-                    showNotification('Наименование направления не может быть пустым', 'error');
+                    showNotification('Наименование направления обязательно', 'error');
                     return false;
                 }
                 if (directionInput.length > 255) {
                     showNotification('Наименование направления не должно превышать 255 символов', 'error');
                     return false;
                 }
-                if (!levelInput) {
-                    showNotification('Уровень направления обязателен', 'error');
+                if (levelInput && !['Бакалавриат', 'Магистратура', 'Аспирантура'].includes(levelInput)) {
+                    showNotification('Недопустимый уровень направления', 'error');
                     return false;
                 }
-                if (levelInput.length > 50) {
-                    showNotification('Уровень направления не должен превышать 50 символов', 'error');
+                if (!vshCodeInput) {
+                    showNotification('Выбор школы обязателен', 'error');
                     return false;
                 }
                 return true;
             } catch (error) {
-                showNotification('Ошибка при валидации формы направления', 'error');
+                showNotification('Ошибка при валидации формы направления: ' + error.message, 'error');
                 return false;
             }
         }
 
-        // Функция фильтрации направлений
         function filterDirections() {
             const filterValue = document.getElementById('school-filter').value;
+            const schoolFilter = document.getElementById('school-filter');
             const table = document.getElementById('directions-table');
             const rows = table.querySelectorAll('tbody tr');
 
-            // Установить текущий код школы из фильтра
             currentSchoolCode = filterValue || null;
-            // Сохраняем значение фильтра в sessionStorage
             sessionStorage.setItem('schoolFilterValue', filterValue);
+
+            schoolFilter.disabled = !!filterValue;
 
             rows.forEach(row => {
                 const vshCode = row.getAttribute('data-vsh-code');
@@ -1080,23 +1100,19 @@ foreach ($results as $row) {
             });
         }
 
-        // Обработчик события для фильтра
         document.getElementById('school-filter').addEventListener('change', () => {
-            // Сбрасываем блокировку при изменении фильтра вручную
-            const schoolFilter = document.getElementById('school-filter');
-            schoolFilter.disabled = false;
             filterDirections();
         });
 
-        // Инициализация фильтра при загрузке страницы
         document.addEventListener('DOMContentLoaded', () => {
             const schoolFilter = document.getElementById('school-filter');
-            // Восстанавливаем значение фильтра из sessionStorage
             const savedFilterValue = sessionStorage.getItem('schoolFilterValue');
             if (savedFilterValue) {
                 schoolFilter.value = savedFilterValue;
+                schoolFilter.disabled = !!savedFilterValue;
                 filterDirections();
             } else if (schoolFilter.value) {
+                schoolFilter.disabled = true;
                 filterDirections();
             }
         });

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ЮГУ - Генератор документов</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --yugu-dark-blue: #002856;
+            --yugu-blue: #003366;
+            --yugu-light-blue: #0066cc;
+            --yugu-gold: #cc9900;
+            --yugu-light-gold: #e6c229;
+            --yugu-white: #ffffff;
+            --yugu-light-gray: #f8f9fa;
+            --transition-fast: 0.2s ease;
+            --transition-medium: 0.3s ease;
+        }
+
+        /* Навбар */
+        .navbar {
+            background: linear-gradient(135deg, var(--yugu-dark-blue) 0%, var(--yugu-blue) 100%);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 0;
+            position: relative;
+            z-index: 1000;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        .navbar-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 0 20px;
+        }
+
+        /* Логотип */
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
+            transition: var(--transition-medium);
+        }
+
+        .brand-logo {
+            height: 42px;
+            width: auto;
+            transition: var(--transition-medium);
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+        }
+
+        .brand-text {
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: var(--yugu-white);
+            letter-spacing: 0.5px;
+            transition: var(--transition-medium);
+        }
+
+        .brand-subtext {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.85);
+            margin-top: 2px;
+        }
+
+        /* Навигация с эффектом свечения */
+        .nav-link {
+            font-weight: 600;
+            font-size: 0.97rem;
+            color: var(--yugu-white) !important;
+            padding: 16px 18px !important;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+            position: relative;
+            border-radius: 6px;
+            margin: 0 2px;
+        }
+
+        .nav-link i {
+            font-size: 1.15rem;
+            margin-right: 10px;
+            color: var(--yugu-light-gold);
+            transition: var(--transition-fast);
+        }
+
+        .nav-link:hover, 
+        .nav-link:focus {
+            color: var(--yugu-light-gold) !important;
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .nav-link.active {
+            color: var(--yugu-light-gold) !important;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 15px rgba(204, 153, 0, 0.4);
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from {
+                box-shadow: 0 0 10px rgba(204, 153, 0, 0.4);
+            }
+            to {
+                box-shadow: 0 0 20px rgba(204, 153, 0, 0.6);
+            }
+        }
+
+        .nav-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 18px;
+            right: 18px;
+            height: 3px;
+            background: var(--yugu-light-gold);
+            border-radius: 3px 3px 0 0;
+            animation: underlineGrow 0.3s ease-out;
+        }
+
+        /* Выпадающее меню */
+        .dropdown-menu {
+            background: var(--yugu-white);
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            padding: 6px 0;
+            margin-top: 8px !important;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        .dropdown-item {
+            font-weight: 500;
+            color: var(--yugu-blue);
+            padding: 10px 20px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            margin: 2px 8px;
+            border-radius: 5px;
+        }
+
+        .dropdown-item i {
+            color: var(--yugu-light-blue);
+            font-size: 0.95rem;
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .dropdown-item.active, 
+        .dropdown-item:active {
+            background: rgba(0, 102, 204, 0.1) !important;
+            color: var(--yugu-blue) !important;
+            box-shadow: inset 3px 0 0 var(--yugu-light-blue);
+            font-weight: 600;
+        }
+
+        .dropdown-item:hover {
+            background: rgba(0, 102, 204, 0.08);
+            color: var(--yugu-light-blue);
+            transform: translateX(3px);
+        }
+
+        /* Поиск */
+        .search-container {
+            position: relative;
+            width: 280px;
+            margin-left: 15px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 15px 10px 40px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50px;
+            background: rgba(255, 255, 255, 0.15);
+            color: var(--yugu-white);
+            font-size: 0.9rem;
+            transition: var(--transition-medium);
+        }
+
+        .search-input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 0 0 3px rgba(204, 153, 0, 0.2);
+        }
+
+        /* Адаптивность */
+        @media (max-width: 1199.98px) {
+            .search-container {
+                width: 240px;
+            }
+        }
+
+        @media (max-width: 991.98px) {
+            .navbar-brand {
+                padding: 8px 0;
+            }
+            
+            .search-container {
+                width: 100%;
+                margin: 10px 0 8px;
+                order: 3;
+            }
+            
+            .dropdown-menu {
+                background: rgba(0, 0, 0, 0.08);
+                box-shadow: none;
+            }
+            
+            .dropdown-item {
+                color: var(--yugu-white);
+            }
+            
+            .nav-link.active {
+                box-shadow: 0 0 10px rgba(204, 153, 0, 0.3);
+            }
+        }
+
+        @media (max-width: 767.98px) {
+            .nav-link {
+                padding: 12px 14px !important;
+            }
+            
+            .brand-text {
+                font-size: 1.15rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container-fluid navbar-container">
+            <a class="navbar-brand" href="index.html">
+                <img src="8.svg" alt="ЮГУ" class="brand-logo">
+                <span class="brand-text">
+                    Генератор документов
+                    <span class="brand-subtext">Югорский государственный университет</span>
+                </span>
+            </a>
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="mainNavbar">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="referencesDropdown" role="button" 
+                           data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-journal-bookmark-fill"></i> Справочники
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="referencesDropdown">
+                            <li><a class="dropdown-item" href="main-group.php"><i class="bi bi-people-fill"></i> Группы и студенты</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="mathelp.php"><i class="bi bi-tags-fill"></i> Категории</a></li>
+                            <li><a class="dropdown-item" href="schools.php"><i class="bi bi-building-gear"></i> Высшие школы и направления</a></li>
+                            <li><a class="dropdown-item" href="#"><i class="bi bi-signpost-split"></i> ..</a></li>
+                        </ul>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="main-work.html">
+                            <i class="bi bi-file-earmark-richtext"></i> Основная работа
+                        </a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="reports.html">
+                            <i class="bi bi-bar-chart-steps"></i> Отчёты
+                        </a>
+                    </li>
+                </ul>
+
+                <div class="search-container">
+                    <input type="search" class="search-input" placeholder="Поиск документов...">
+                    <i class="bi bi-search search-icon"></i>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Улучшенный скрипт для определения активной страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            const setActiveNav = () => {
+                const currentPath = window.location.pathname.split('/').pop().split('?')[0].split('#')[0];
+                const navItems = document.querySelectorAll('.nav-link, .dropdown-item');
+                
+                navItems.forEach(item => {
+                    item.classList.remove('active');
+                    const href = item.getAttribute('href');
+                    
+                    if (href) {
+                        const itemPath = href.split('/').pop().split('?')[0].split('#')[0];
+                        const isActive = currentPath === itemPath || 
+                                        (currentPath === '' && itemPath === 'index.html') || 
+                                        (currentPath === itemPath.replace('.html', ''));
+                        
+                        if (isActive) {
+                            item.classList.add('active');
+                            
+                            // Активируем родительский dropdown
+                            if (item.classList.contains('dropdown-item')) {
+                                const dropdown = item.closest('.dropdown-menu');
+                                if (dropdown) {
+                                    dropdown.previousElementSibling.classList.add('active');
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+
+            // Инициализация
+            setActiveNav();
+            
+            // Обработчики для SPA
+            window.addEventListener('popstate', setActiveNav);
+            document.addEventListener('click', e => {
+                if (e.target.closest('a')) {
+                    setTimeout(setActiveNav, 50);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

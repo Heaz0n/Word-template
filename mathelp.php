@@ -12,6 +12,9 @@ try {
     die("Ошибка подключения к базе данных: " . $e->getMessage());
 }
 
+// Инициализация переменной для уведомлений
+$notification = '';
+
 // Обработка экспорта в Excel
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export_excel'])) {
     try {
@@ -121,6 +124,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_category'])) {
             ':max_amount' => $maxAmount
         ]);
 
+        // Устанавливаем уведомление об успешном добавлении
+        $notification = 'Категория успешно добавлена!';
+        
         // Очищаем сохраненные данные формы после успешной отправки
         echo '<script>localStorage.removeItem("formData");</script>';
         header("Location: ".filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
@@ -167,6 +173,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_category'])) {
             ':max_amount' => $maxAmount
         ]);
 
+        // Устанавливаем уведомление об успешном редактировании
+        $notification = 'Категория успешно обновлена!';
+        
         header("Location: ".filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
         exit();
     } catch (PDOException $e) {
@@ -185,6 +194,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['delete_id'])) {
         $stmt = $pdo->prepare("DELETE FROM categories WHERE id = :id");
         $stmt->execute([':id' => $id]);
 
+        // Устанавливаем уведомление об успешном удалении
+        $notification = 'Категория успешно удалена!';
+        
         header("Location: ".filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
         exit();
     } catch (PDOException $e) {
@@ -213,6 +225,10 @@ try {
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
         }
         /* Стили меню */
         .nav-category {
@@ -276,6 +292,19 @@ try {
             display: none;
             animation: fadeIn 0.3s ease-out;
         }
+        .action-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #28a745;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 1050;
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
         .export-buttons {
             margin-bottom: 20px;
         }
@@ -288,6 +317,11 @@ try {
     <!-- Уведомление об автосохранении -->
     <div class="auto-save-notice" id="autoSaveNotice">
         Данные формы автоматически сохранены
+    </div>
+
+    <!-- Уведомление о действиях -->
+    <div class="action-notification" id="actionNotification">
+        <?= htmlspecialchars($notification) ?>
     </div>
 
     <!-- Основной контент -->
@@ -492,6 +526,18 @@ try {
                     console.error('Ошибка загрузки header.html:', error);
                     document.getElementById('header-container').innerHTML = '<div class="alert alert-danger">Не удалось загрузить шапку</div>';
                 });
+
+            // Показываем уведомление, если оно есть
+            const notification = document.getElementById('actionNotification');
+            if (notification.textContent.trim() !== '') {
+                notification.style.display = 'block';
+                setTimeout(() => {
+                    notification.style.animation = 'fadeOut 0.5s ease-out';
+                    setTimeout(() => {
+                        notification.style.display = 'none';
+                    }, 500);
+                }, 3000);
+            }
 
             // Обработчики для кнопок редактирования
             document.querySelectorAll('.edit-btn').forEach(btn => {
