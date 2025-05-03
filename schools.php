@@ -65,9 +65,6 @@ function handleDirectionAction($pdo, $action, $data) {
     $level = trim($data['level'] ?? '');
     $notes = trim($data['notes'] ?? '');
 
-    // Отладка: логируем полученное значение vsh_code
-    error_log("handleDirectionAction: action = '$action', vsh_code = '$vsh_code', level = '$level', raw POST: " . print_r($data, true));
-
     // Валидация
     if (empty($direction_name)) {
         return ['type' => 'error', 'message' => 'Наименование направления обязательно'];
@@ -79,7 +76,6 @@ function handleDirectionAction($pdo, $action, $data) {
         return ['type' => 'error', 'message' => 'Недопустимый уровень направления'];
     }
     if (empty($vsh_code)) {
-        error_log("handleDirectionAction: vsh_code is empty");
         return ['type' => 'error', 'message' => 'Выбор школы обязателен'];
     }
 
@@ -87,13 +83,10 @@ function handleDirectionAction($pdo, $action, $data) {
     try {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM Schools WHERE code = ?");
         $stmt->execute([$vsh_code]);
-        $schoolExists = $stmt->fetchColumn();
-        error_log("handleDirectionAction: schoolExists for vsh_code '$vsh_code' = $schoolExists");
-        if ($schoolExists == 0) {
+        if ($stmt->fetchColumn() == 0) {
             return ['type' => 'error', 'message' => "Школа с кодом '$vsh_code' не существует"];
         }
     } catch (PDOException $e) {
-        error_log("handleDirectionAction: Database error while checking school: " . $e->getMessage());
         return ['type' => 'error', 'message' => 'Ошибка проверки школы: ' . $e->getMessage()];
     }
 
@@ -109,7 +102,6 @@ function handleDirectionAction($pdo, $action, $data) {
             return ['type' => 'success', 'message' => "Направление '$direction_name' успешно обновлено"];
         }
     } catch (PDOException $e) {
-        error_log("handleDirectionAction: Database error: " . $e->getMessage());
         if ($e->getCode() == '23000') {
             return ['type' => 'error', 'message' => "Направление '$direction_name' уже существует для выбранной школы"];
         }
@@ -120,9 +112,6 @@ function handleDirectionAction($pdo, $action, $data) {
 
 // Обработка действий
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    // Отладка: логируем весь POST-запрос
-    error_log("POST data: " . print_r($_POST, true));
-
     // Проверка CSRF-токена
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
         $_SESSION['notification'] = ['type' => 'error', 'message' => 'Недействительный CSRF-токен'];
@@ -141,31 +130,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         try {
             $pdo->beginTransaction();
 
-            // Проверка связанных групп
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` WHERE direction_id IN (SELECT code FROM Directions WHERE vsh_code = ?)");
+            // Получение имени школы для уведомления
+            $stmt = $pdo->prepare("SELECT name FROM Schools WHERE code = ?");
             $stmt->execute([$code]);
-            if ($stmt->fetchColumn() > 0) {
-                $pdo->rollBack();
-                $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить школу, так как она связана с группами'];
-            } else {
-                // Получение имени школы для уведомления
-                $stmt = $pdo->prepare("SELECT name FROM Schools WHERE code = ?");
-                $stmt->execute([$code]);
-                $schoolName = $stmt->fetchColumn();
+            $schoolName = $stmt->fetchColumn();
 
-                // Удаление всех направлений, связанных с этой школой
-                error_log("Deleting directions for school code: $code");
-                $stmt = $pdo->prepare("DELETE FROM Directions WHERE vsh_code = ?");
-                $stmt->execute([$code]);
+            // Удаление школы (направления, группы, студенты и связанные данные удаляются автоматически благодаря ON DELETE CASCADE)
+            $stmt = $pdo->prepare("DELETE FROM Schools WHERE code = ?");
+            $stmt->execute([$code]);
 
-                // Удаление школы
-                error_log("Deleting school with code: $code");
-                $stmt = $pdo->prepare("DELETE FROM Schools WHERE code = ?");
-                $stmt->execute([$code]);
-
-                $pdo->commit();
-                $_SESSION['notification'] = ['type' => 'success', 'message' => "Школа '$schoolName' и связанные направления успешно удалены"];
-            }
+            $pdo->commit();
+            $_SESSION['notification'] = ['type' => 'success', 'message' => "Школа '$schoolName' и все связанные данные успешно удалены"];
         } catch (PDOException $e) {
             $pdo->rollBack();
             $_SESSION['notification'] = ['type' => 'error', 'message' => 'Ошибка при удалении школы: ' . $e->getMessage()];
@@ -173,20 +148,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } elseif ($action === 'delete_direction') {
         $code = $_POST['code'];
         try {
-            // Проверка связанных групп
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` WHERE direction_id = ?");
+            // Получение имени направления для уведомления
+            $stmt = $pdo->prepare("SELECT direction_name FROM Directions WHERE code = ?");
             $stmt->execute([$code]);
-            if ($stmt->fetchColumn() > 0) {
-                $_SESSION['notification'] = ['type' => 'error', 'message' => 'Нельзя удалить направление, так как оно связано с группами'];
-            } else {
-                $stmt = $pdo->prepare("SELECT direction_name FROM Directions WHERE code = ?");
-                $stmt->execute([$code]);
-                $directionName = $stmt->fetchColumn();
+            $directionName = $stmt->fetchColumn();
 
-                $stmt = $pdo->prepare("DELETE FROM Directions WHERE code = ?");
-                $stmt->execute([$code]);
-                $_SESSION['notification'] = ['type' => 'success', 'message' => "Направление '$directionName' успешно удалено"];
-            }
+            // Удаление направления (группы, студенты и связанные данные удаляются автоматически благодаря ON DELETE CASCADE)
+            $stmt = $pdo->prepare("DELETE FROM Directions WHERE code = ?");
+            $stmt->execute([$code]);
+
+            $_SESSION['notification'] = ['type' => 'success', 'message' => "Направление '$directionName' и все связанные данные успешно удалены"];
         } catch (PDOException $e) {
             $_SESSION['notification'] = ['type' => 'error', 'message' => 'Ошибка при удалении направления: ' . $e->getMessage()];
         }
@@ -654,14 +625,7 @@ foreach ($results as $row) {
     </style>
 </head>
 <body>
-    <?php
-    // Безопасное включение header.html
-    if (file_exists('header.html')) {
-        include 'header.html';
-    } else {
-        echo '<header><nav><ul><li><a href="schools.php">Главная</a></li></ul></nav></header>';
-    }
-    ?>
+    <?php include 'header.html'; ?>
 
     <div class="notification-container">
         <?php if (isset($_SESSION['notification'])): ?>
@@ -1000,7 +964,7 @@ foreach ($results as $row) {
         }
 
         function confirmDeleteSchool(code) {
-            if (confirm('Вы уверены, что хотите удалить эту школу? Все связанные направления также будут удалены.')) {
+            if (confirm('Вы уверены, что хотите удалить эту школу? Все связанные данные (направления, группы, студенты) будут удалены.')) {
                 const form = document.createElement('form');
                 form.method = 'POST';
                 form.innerHTML = `
@@ -1014,7 +978,7 @@ foreach ($results as $row) {
         }
 
         function confirmDeleteDirection(code) {
-            if (confirm('Вы уверены, что хотите удалить это направление?')) {
+            if (confirm('Вы уверены, что хотите удалить это направление? Все связанные данные (группы, студенты) будут удалены.')) {
                 const form = document.createElement('form');
                 form.method = 'POST';
                 form.innerHTML = `

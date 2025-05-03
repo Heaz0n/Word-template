@@ -2,8 +2,8 @@
 // Подключение к базе данных
 $host = 'localhost';
 $dbname = 'SystemDocument';
-$username = 'root'; // Укажите ваше имя пользователя MySQL
-$password = '';     // Укажите ваш пароль MySQL
+$username = 'root';
+$password = '';
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -21,13 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export_excel'])) {
         $stmt = $pdo->query("SELECT * FROM categories ORDER BY CAST(number AS UNSIGNED)");
         $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // Подключение библиотеки PhpSpreadsheet
         require 'vendor/autoload.php';
         
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         
-        // Заголовки
         $sheet->setCellValue('A1', 'ID');
         $sheet->setCellValue('B1', '№ п/п');
         $sheet->setCellValue('C1', 'Категория');
@@ -36,7 +34,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export_excel'])) {
         $sheet->setCellValue('F1', 'Периодичность выплат');
         $sheet->setCellValue('G1', 'Максимальная сумма (руб.)');
         
-        // Данные
         $row = 2;
         foreach ($categories as $category) {
             $sheet->setCellValue('A' . $row, $category['id'] ?? '');
@@ -49,12 +46,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export_excel'])) {
             $row++;
         }
         
-        // Авторазмер колонок
         foreach (range('A', 'G') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
         
-        // Заголовки для скачивания
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="categories_export.xlsx"');
         header('Cache-Control: max-age=0');
@@ -77,12 +72,12 @@ function checkSequentialIds($pdo) {
             $expectedId = 1;
             foreach ($ids as $id) {
                 if ($id != $expectedId) {
-                    return false; // Найден пропуск
+                    return false;
                 }
                 $expectedId++;
             }
         }
-        return true; // Все ID идут последовательно
+        return true;
     } catch (PDOException $e) {
         die("Ошибка при проверке последовательности ID: " . $e->getMessage());
     }
@@ -91,12 +86,10 @@ function checkSequentialIds($pdo) {
 // Добавление категории
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_category'])) {
     try {
-        // Проверяем последовательность ID
         if (!checkSequentialIds($pdo)) {
             die("Ошибка: В таблице есть пропущенные значения ID. Пожалуйста, исправьте это.");
         }
 
-        // Валидация и обработка входных данных
         $number = isset($_POST['number']) ? trim($_POST['number']) : '';
         $categoryName = isset($_POST['category_name']) ? trim($_POST['category_name']) : '';
         $categoryShort = isset($_POST['category_short']) ? trim($_POST['category_short']) : '';
@@ -112,7 +105,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_category'])) {
             die("Ошибка: Поле '№ п/п' должно содержать только цифры и точки (например, 5.2.1).");
         }
 
-        // Добавляем новую категорию
         $stmt = $pdo->prepare("INSERT INTO categories (number, category_name, category_short, documents_list, payment_frequency, max_amount) 
                                VALUES (:number, :category_name, :category_short, :documents_list, :payment_frequency, :max_amount)");
         $stmt->execute([
@@ -124,12 +116,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_category'])) {
             ':max_amount' => $maxAmount
         ]);
 
-        // Устанавливаем уведомление об успешном добавлении
         $notification = 'Категория успешно добавлена!';
-        
-        // Очищаем сохраненные данные формы после успешной отправки
         echo '<script>localStorage.removeItem("formData");</script>';
-        header("Location: ".filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
+        header("Location: " . filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
         exit();
     } catch (PDOException $e) {
         die("Ошибка при добавлении категории: " . $e->getMessage());
@@ -173,10 +162,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_category'])) {
             ':max_amount' => $maxAmount
         ]);
 
-        // Устанавливаем уведомление об успешном редактировании
         $notification = 'Категория успешно обновлена!';
-        
-        header("Location: ".filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
+        header("Location: " . filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
         exit();
     } catch (PDOException $e) {
         die("Ошибка при редактировании категории: " . $e->getMessage());
@@ -194,17 +181,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['delete_id'])) {
         $stmt = $pdo->prepare("DELETE FROM categories WHERE id = :id");
         $stmt->execute([':id' => $id]);
 
-        // Устанавливаем уведомление об успешном удалении
         $notification = 'Категория успешно удалена!';
-        
-        header("Location: ".filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
+        header("Location: " . filter_var($_SERVER['PHP_SELF'], FILTER_SANITIZE_URL));
         exit();
     } catch (PDOException $e) {
         die("Ошибка при удалении категории: " . $e->getMessage());
     }
 }
 
-// Получение всех категорий из базы данных
+// Получение всех категорий
 try {
     $stmt = $pdo->query("SELECT * FROM categories ORDER BY CAST(number AS UNSIGNED)");
     $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -218,10 +203,269 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Основания для оказания материальной поддержки</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Анимации */
+        :root {
+            --yugu-dark-blue: #002856;
+            --yugu-blue: #003366;
+            --yugu-light-blue: #0066cc;
+            --yugu-gold: #cc9900;
+            --yugu-light-gold: #e6c229;
+            --yugu-white: #ffffff;
+            --yugu-light-gray: #f8f9fa;
+            --transition-fast: 0.2s ease;
+            --transition-medium: 0.3s ease;
+        }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: #f5f7fa;
+        }
+
+        /* Стили для навбара (из header.html) */
+        .navbar {
+            background: linear-gradient(135deg, var(--yugu-dark-blue) 0%, var(--yugu-blue) 100%);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 0;
+            position: relative;
+            z-index: 1000;
+        }
+
+        .navbar-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 0 20px;
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
+            transition: var(--transition-medium);
+        }
+
+        .brand-logo {
+            height: 42px;
+            width: auto;
+            transition: var(--transition-medium);
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+        }
+
+        .brand-text {
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: var(--yugu-white);
+            letter-spacing: 0.5px;
+            transition: var(--transition-medium);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .brand-subtext {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.85);
+            margin-top: 2px;
+        }
+
+        .navbar-brand:hover .brand-text {
+            color: var(--yugu-light-gold);
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .navbar-brand:hover .brand-logo {
+            transform: scale(1.05);
+            filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.15));
+        }
+
+        .nav-item {
+            position: relative;
+            margin: 0 5px;
+        }
+
+        .nav-link {
+            font-weight: 600;
+            font-size: 0.97rem;
+            color: var(--yugu-white) !important;
+            padding: 16px 18px !important;
+            display: flex;
+            align-items: center;
+            transition: var(--transition-fast);
+            position: relative;
+            border-radius: 6px;
+        }
+
+        .nav-link i {
+            font-size: 1.15rem;
+            margin-right: 10px;
+            color: var(--yugu-light-gold);
+            transition: var(--transition-fast);
+        }
+
+        .nav-link:hover, 
+        .nav-link:focus {
+            color: var(--yugu-light-gold) !important;
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .nav-link:hover i {
+            transform: scale(1.15);
+            color: var(--yugu-gold);
+        }
+
+        .nav-link.active {
+            color: var(--yugu-light-gold) !important;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 18px;
+            right: 18px;
+            height: 3px;
+            background: var(--yugu-light-gold);
+            border-radius: 3px 3px 0 0;
+            animation: underlineGrow 0.3s ease-out;
+            box-shadow: 0 2px 4px rgba(204, 153, 0, 0.2);
+        }
+
+        @keyframes underlineGrow {
+            from { transform: scaleX(0); opacity: 0; }
+            to { transform: scaleX(1); opacity: 1; }
+        }
+
+        .dropdown-menu {
+            background: var(--yugu-white);
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            padding: 8px 0;
+            margin-top: 10px !important;
+            animation: fadeInDropdown 0.25s ease-out;
+            min-width: 250px;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            display: none;
+            position: absolute;
+        }
+
+        @keyframes fadeInDropdown {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .dropdown-menu.show {
+            display: block;
+        }
+
+        .dropdown-item {
+            font-weight: 500;
+            color: var(--yugu-blue);
+            padding: 10px 22px;
+            transition: var(--transition-fast);
+            display: flex;
+            align-items: center;
+            border-radius: 6px;
+            margin: 0 8px;
+            width: auto;
+        }
+
+        .dropdown-item i {
+            color: var(--yugu-light-blue);
+            font-size: 1rem;
+            margin-right: 12px;
+            width: 20px;
+            text-align: center;
+            transition: var(--transition-fast);
+        }
+
+        .dropdown-item:hover, 
+        .dropdown-item:focus {
+            background: rgba(0, 102, 204, 0.1);
+            color: var(--yugu-light-blue);
+            transform: translateX(3px);
+        }
+
+        .dropdown-item:hover i {
+            transform: scale(1.15);
+            color: var(--yugu-gold);
+        }
+
+        .dropdown-divider {
+            border-color: rgba(0, 0, 0, 0.08);
+            margin: 8px 0;
+        }
+
+        .dropdown-toggle::after {
+            display: none;
+        }
+
+        @media (max-width: 1199.98px) {
+            .nav-link {
+                padding: 14px 16px !important;
+            }
+        }
+
+        @media (max-width: 991.98px) {
+            .navbar-brand {
+                padding: 10px 0;
+            }
+            .brand-logo {
+                height: 38px;
+            }
+            .brand-text {
+                font-size: 1.15rem;
+            }
+            .nav-link {
+                padding: 12px 16px !important;
+            }
+            .dropdown-menu {
+                box-shadow: none;
+                background: rgba(0, 0, 0, 0.08);
+                margin-top: 0 !important;
+                border-radius: 0;
+                border: none;
+                display: none;
+            }
+            .dropdown-toggle::after {
+                display: inline-block;
+            }
+            .dropdown-item {
+                color: var(--yugu-white);
+                padding: 8px 16px 8px 45px;
+            }
+            .dropdown-item i {
+                color: var(--yugu-light-gold);
+            }
+            .dropdown-item:hover {
+                background: rgba(255, 255, 255, 0.1);
+                transform: none;
+            }
+        }
+
+        @media (max-width: 767.98px) {
+            .navbar-container {
+                padding: 0 16px;
+            }
+            .brand-text {
+                font-size: 1.05rem;
+            }
+            .brand-subtext {
+                font-size: 0.72rem;
+            }
+            .nav-link {
+                padding: 10px 14px !important;
+            }
+        }
+
+        /* Стили из mathelp.php */
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -230,7 +474,6 @@ try {
             from { opacity: 1; }
             to { opacity: 0; }
         }
-        /* Стили меню */
         .nav-category {
             position: relative;
         }
@@ -259,7 +502,6 @@ try {
         .submenu a:hover {
             background: #f5f5f5;
         }
-        /* Стили таблицы */
         .table-responsive {
             overflow-x: auto;
         }
@@ -311,8 +553,51 @@ try {
     </style>
 </head>
 <body>
-    <!-- Контейнер для шапки -->
-    <div id="header-container"></div>
+    <!-- Навигационное меню (перенесено из header.html) -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container-fluid navbar-container">
+            <a class="navbar-brand" href="#">
+                <img src="8.svg" alt="ЮГУ" class="brand-logo">
+                <span class="brand-text">
+                    Генератор документов
+                    <span class="brand-subtext">Югорский государственный университет</span>
+                </span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" 
+                    aria-controls="mainNavbar" aria-expanded="false" aria-label="Переключить навигацию">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="mainNavbar">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="referencesDropdown" 
+                           aria-expanded="false">
+                            <i class="bi bi-journal-bookmark-fill"></i> Справочники
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="referencesDropdown">
+                            <li><a class="dropdown-item" href="main-group.php"><i class="bi bi-people-fill"></i> Группы и студенты</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="mathelp.php"><i class="bi bi-tags-fill"></i> Категории</a></li>
+                            <li><a class="dropdown-item" href="schools.php"><i class="bi bi-building-gear"></i> Высшие школы и направления</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#"><i class="bi bi-person-badge"></i> ..</a></li>
+                            <li><a class="dropdown-item" href="#"><i class="bi bi-heart-fill"></i> ..</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="main-work.php">
+                            <i class="bi bi-file-earmark-richtext"></i> Основная работа
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="reports.html">
+                            <i class="bi bi-bar-chart-steps"></i> Отчёты
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
 
     <!-- Уведомление об автосохранении -->
     <div class="auto-save-notice" id="autoSaveNotice">
@@ -326,18 +611,15 @@ try {
 
     <!-- Основной контент -->
     <div class="container mt-4">
-        <!-- Заголовок с кнопками -->
         <div class="d-flex align-items-center mb-3">
             <h2 class="mb-0"><i class="bi bi-cash-stack"></i> Категории для оказания материальной поддержки</h2>
             <div class="ms-auto">
-                <!-- Кнопка "Добавить" -->
                 <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#addModal">
                     <i class="bi bi-plus-circle"></i> Добавить
                 </button>
             </div>
         </div>
         
-        <!-- Кнопки экспорта -->
         <div class="export-buttons mb-4">
             <a href="?export_excel=1" class="btn btn-primary">
                 <i class="bi bi-file-earmark-excel"></i> Экспорт в Excel
@@ -508,26 +790,79 @@ try {
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Подключение header.html
-            fetch('header.html')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.text();
-                })
-                .then(data => {
-                    document.getElementById('header-container').innerHTML = data;
-                })
-                .catch(error => {
-                    console.error('Ошибка загрузки header.html:', error);
-                    document.getElementById('header-container').innerHTML = '<div class="alert alert-danger">Не удалось загрузить шапку</div>';
+            // Управление выпадающим меню (из header.html)
+            const dropdownToggle = document.querySelector('#referencesDropdown');
+            const dropdownMenu = document.querySelector('.dropdown-menu');
+            let isMenuOpen = false;
+
+            if (dropdownToggle && dropdownMenu) {
+                dropdownToggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    isMenuOpen = !isMenuOpen;
+                    dropdownMenu.classList.toggle('show', isMenuOpen);
                 });
 
-            // Показываем уведомление, если оно есть
+                document.addEventListener('click', function(e) {
+                    if (!dropdownToggle.contains(e.target) && !dropdownMenu.contains(e.target)) {
+                        isMenuOpen = false;
+                        dropdownMenu.classList.remove('show');
+                    }
+                });
+
+                dropdownMenu.querySelectorAll('.dropdown-item').forEach(item => {
+                    item.addEventListener('click', function() {
+                        isMenuOpen = false;
+                        dropdownMenu.classList.remove('show');
+                    });
+                });
+            }
+
+            // Установка активного пункта меню (из header.html)
+            function setActiveNavItem() {
+                const currentPath = window.location.pathname.split('/').pop().split('?')[0];
+                const allNavItems = document.querySelectorAll('.nav-link, .dropdown-item');
+                
+                allNavItems.forEach(item => item.classList.remove('active'));
+                
+                allNavItems.forEach(item => {
+                    const itemHref = item.getAttribute('href');
+                    if (itemHref) {
+                        const itemPath = itemHref.split('/').pop().split('?')[0];
+                        
+                        if (currentPath === itemPath || 
+                            (currentPath === '' && itemPath === 'index.html') ||
+                            (itemPath === currentPath + '.html')) {
+                            
+                            item.classList.add('active');
+                            
+                            if (item.classList.contains('dropdown-item')) {
+                                const dropdownToggle = item.closest('.dropdown-menu').previousElementSibling;
+                                if (dropdownToggle) {
+                                    dropdownToggle.classList.add('active');
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                if (currentPath === '' || currentPath === 'index.html') {
+                    document.querySelector('.navbar-brand').classList.add('active-brand');
+                }
+            }
+
+            setActiveNavItem();
+            window.addEventListener('popstate', setActiveNavItem);
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('a')) {
+                    setTimeout(setActiveNavItem, 50);
+                }
+            });
+            window.addEventListener('load', setActiveNavItem);
+
+            // Показ уведомления
             const notification = document.getElementById('actionNotification');
             if (notification.textContent.trim() !== '') {
                 notification.style.display = 'block';
@@ -559,18 +894,16 @@ try {
                 });
             });
 
-            // Очистка формы добавления при закрытии модального окна
-            document.getElementById('addModal').addEventListener('hidden.bs.modal', function () {
+            // Очистка формы добавления
+            document.getElementById('addModal').addEventListener('hidden.bs.modal', function() {
                 this.querySelector('form').reset();
-                // Очищаем сообщения об ошибках
                 document.querySelectorAll('#addForm .error-message').forEach(el => {
                     el.textContent = '';
                 });
             });
 
-            // Очистка формы редактирования при закрытии модального окна
-            document.getElementById('editModal').addEventListener('hidden.bs.modal', function () {
-                // Очищаем сообщения об ошибках
+            // Очистка формы редактирования
+            document.getElementById('editModal').addEventListener('hidden.bs.modal', function() {
                 document.querySelectorAll('#editForm .error-message').forEach(el => {
                     el.textContent = '';
                 });
@@ -579,10 +912,8 @@ try {
             // Валидация формы добавления
             document.getElementById('addForm').addEventListener('submit', function(e) {
                 let isValid = true;
-
-                // Проверка номера
                 const number = document.getElementById('newNumber').value.trim();
-                const numberPattern = /^[\d]+(\.[\d]+)*$/; // Регулярное выражение: только цифры и точки
+                const numberPattern = /^[\d]+(\.[\d]+)*$/;
                 if (!number || !numberPattern.test(number)) {
                     document.getElementById('numberError').textContent = 'Введите корректный номер (например, 5.2.1)';
                     isValid = false;
@@ -590,7 +921,6 @@ try {
                     document.getElementById('numberError').textContent = '';
                 }
 
-                // Остальные проверки остаются без изменений
                 const name = document.getElementById('newCategoryName').value.trim();
                 if (!name) {
                     document.getElementById('nameError').textContent = 'Введите название категории';
@@ -634,7 +964,6 @@ try {
                 if (!isValid) {
                     e.preventDefault();
                 } else {
-                    // Очищаем сохраненные данные после успешной отправки
                     localStorage.removeItem('formData');
                 }
             });
@@ -642,10 +971,8 @@ try {
             // Валидация формы редактирования
             document.getElementById('editForm').addEventListener('submit', function(e) {
                 let isValid = true;
-
-                // Проверка номера
                 const number = document.getElementById('editNumber').value.trim();
-                const numberPattern = /^[\d]+(\.[\d]+)*$/; // Регулярное выражение: только цифры и точки
+                const numberPattern = /^[\d]+(\.[\d]+)*$/;
                 if (!number || !numberPattern.test(number)) {
                     document.getElementById('editNumberError').textContent = 'Введите корректный номер (например, 5.2.1)';
                     isValid = false;
@@ -653,7 +980,6 @@ try {
                     document.getElementById('editNumberError').textContent = '';
                 }
 
-                // Остальные проверки остаются без изменений
                 const name = document.getElementById('editCategoryName').value.trim();
                 if (!name) {
                     document.getElementById('editNameError').textContent = 'Введите название категории';
@@ -699,7 +1025,7 @@ try {
                 }
             });
 
-            // Функция для сохранения данных формы
+            // Автосохранение формы
             function saveFormData() {
                 const formData = {
                     number: document.getElementById('newNumber').value,
@@ -710,8 +1036,6 @@ try {
                     maxAmount: document.getElementById('newMaxAmount').value
                 };
                 localStorage.setItem('formData', JSON.stringify(formData));
-
-                // Показываем уведомление об автосохранении
                 const notice = document.getElementById('autoSaveNotice');
                 notice.style.display = 'block';
                 setTimeout(() => {
@@ -719,7 +1043,7 @@ try {
                 }, 3000);
             }
 
-            // Функция для загрузки сохраненных данных
+            // Загрузка сохраненных данных
             function loadFormData() {
                 const savedData = localStorage.getItem('formData');
                 if (savedData) {
@@ -733,7 +1057,6 @@ try {
                 }
             }
 
-            // Обработчики событий для автосохранения
             document.getElementById('newNumber').addEventListener('input', saveFormData);
             document.getElementById('newCategoryName').addEventListener('input', saveFormData);
             document.getElementById('newCategoryShort').addEventListener('input', saveFormData);
@@ -741,17 +1064,14 @@ try {
             document.getElementById('newPaymentFrequency').addEventListener('input', saveFormData);
             document.getElementById('newMaxAmount').addEventListener('input', saveFormData);
 
-            // Загрузка сохраненных данных при открытии страницы
             loadFormData();
 
-            // Очистка сохраненных данных при закрытии модального окна без отправки
             document.getElementById('addModal').addEventListener('hidden.bs.modal', function() {
                 if (!this.querySelector('form').classList.contains('submitted')) {
                     localStorage.removeItem('formData');
                 }
             });
 
-            // Помечаем форму как отправленную перед отправкой
             document.getElementById('addForm').addEventListener('submit', function() {
                 this.classList.add('submitted');
             });
