@@ -1,4 +1,7 @@
 <?php
+header('Content-Type: text/html; charset=utf-8');
+session_start();
+
 // Database configuration
 $host = '127.0.0.1';
 $dbname = 'SystemDocument';
@@ -10,473 +13,841 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    error_log("Database connection error: " . $e->getMessage(), 3, 'errors.log');
-    http_response_code(500);
-    die(json_encode(['status' => 'error', 'message' => 'Server error']));
+    header('Content-Type: application/json', true, 500);
+    echo json_encode(['status' => 'error', 'message' => 'Ошибка подключения к базе данных']);
+    exit;
+}
+
+// Helper functions
+function setFlashMessage($message, $type = 'success') {
+    $_SESSION['flash'][] = ['message' => $message, 'type' => $type];
+}
+
+function getFlashMessages() {
+    $flash = $_SESSION['flash'] ?? [];
+    unset($_SESSION['flash']);
+    return $flash;
+}
+
+function validateFilename($filename, $extension = 'pdf') {
+    if (empty($filename) || !preg_match('/^[a-zA-Z0-9_\-\s]+\.' . $extension . '$/', $filename) ||
+        strpos($filename, '..') !== false || strpos($filename, '/') !== false || strpos($filename, '\\') !== false) {
+        return false;
+    }
+    return true;
+}
+
+// Default template variables
+$defaultTemplateVars = [
+    'UNIVERSITY' => 'ФГБОУ ВО «Югорский государственный университет»',
+    'SCHOOL' => 'Инженерная школа цифровых технологий',
+    'SCHOOL_CODE' => 1,
+    'PROTOCOL_NUMBER' => '7',
+    'DATE' => '«13» января 2025 г.',
+    'DAY' => '13',
+    'MONTH' => 'января',
+    'YEAR' => '2025',
+    'CITY' => 'Ханты-Мансийск',
+    'CHAIRPERSON' => 'Самарина О.В. – руководитель инженерной школы цифровых технологий, доцент инженерной школы цифровых технологий',
+    'CHAIR_DEGREE' => 'к.ф.-м.н., доцент',
+    'MEMBERS' => "Самарин В.А. – руководитель образовательной программы 09.03.01 «Информатика и вычислительная техника», доцент инженерной школы цифровых технологий\nПронькина Т.В. – руководитель образовательной программы 09.03.04 «Программная инженерия», доцент инженерной школы цифровых технологий\nТукмачева Ю.А. – преподаватель инженерной школы цифровых технологий, куратор направления 10.03.01 Информационная безопасность\nЛисимов Артём Андреевич – старший преподаватель инженерной школы цифровых технологий, куратор направлений 09.03.01 Информатика и вычислительная техника и 09.03.04 Программная инженерия\nСуфиянов Денис Илфатович – студент группы ПИ31б, представитель совета обучающихся",
+    'SECRETARY' => 'Шевченко А.С. – заместитель руководителя инженерной школы цифровых технологий по воспитательной работе, доцент инженерной школы цифровых технологий',
+    'SECRETARY_DEGREE' => 'канд. физ.-мат. наук, доцент',
+    'AGENDA' => 'Оказание материальной поддержки нуждающимся студентам инженерной школы цифровых технологий',
+    'LISTENED' => 'Шевченко А.С. – заместитель руководителя инженерной школы цифровых технологий по воспитательной работе, доцент инженерной школы цифровых технологий',
+    'DECISION' => 'Оказать материальную поддержку следующим нуждающимся студентам',
+    'SIGN_CHAIR' => 'Самарина О.В.',
+    'SIGN_SECRETARY' => 'Шевченко А.С.'
+];
+
+$_SESSION['template_vars'] = $_SESSION['template_vars'] ?? $defaultTemplateVars;
+
+function getTemplateVariables() {
+    return $_SESSION['template_vars'];
 }
 
 // Category cache
-$categoryCache = null;
 function getCategories() {
-    global $pdo, $categoryCache;
-    if ($categoryCache === null) {
-        $stmt = $pdo->query("SELECT id, number, category_name, category_short FROM categories ORDER BY number");
-        $categoryCache = $stmt->fetchAll();
+    global $pdo;
+    static $cache = null;
+    if ($cache === null) {
+        $stmt = $pdo->query("SELECT id, number, category_name, category_short, payment_frequency, max_amount FROM categories ORDER BY number");
+        $cache = $stmt->fetchAll();
     }
-    return $categoryCache;
+    return $cache;
 }
 
-// Get category name
 function getCategoryName($category_id) {
-    $categories = getCategories();
-    foreach ($categories as $category) {
-        if ($category['id'] == $category_id) {
-            return $category['category_name'];
-        }
+    foreach (getCategories() as $category) {
+        if ($category['id'] == $category_id) return $category['category_short'];
     }
     return '';
 }
 
-// Get most recent academic year
-function getMostRecentAcademicYear() {
+// Map Russian month names to numeric values
+$monthMap = [
+    'января' => 1,
+    'февраля' => 2,
+    'марта' => 3,
+    'апреля' => 4,
+    'мая' => 5,
+    'июня' => 6,
+    'июля' => 7,
+    'августа' => 8,
+    'сентября' => 9,
+    'октября' => 10,
+    'ноября' => 11,
+    'декабря' => 12
+];
+
+// Fetch students from StudentCategories for preview
+function getStudentCategories($filters = []) {
     global $pdo;
+    $search = $filters['search'] ?? null;
+
+    $query = "
+        SELECT 
+            s.id, 
+            s.full_name, 
+            s.budget, 
+            g.group_name,
+            sc.name AS school_name,
+            scs.category_id,
+            c.max_amount
+        FROM Students s
+        JOIN Groups g ON s.group_id = g.id
+        JOIN Directions d ON g.direction_id = d.code
+        JOIN Schools sc ON d.vsh_code = sc.code
+        JOIN StudentCategories scs ON s.id = scs.student_id
+        JOIN categories c ON scs.category_id = c.id
+        WHERE 1=1
+    ";
+
+    $params = [];
+
+    if ($search) {
+        $query .= " AND s.full_name LIKE ?";
+        $params[] = '%' . $search . '%';
+    }
+
+    $query .= " ORDER BY s.full_name";
+
     try {
-        $stmt = $pdo->query("SELECT year FROM AcademicYears ORDER BY year DESC LIMIT 1");
-        $result = $stmt->fetch();
-        return $result ? $result['year'] : null;
-    } catch (PDOException $e) {
-        error_log("Error fetching most recent academic year: " . $e->getMessage(), 3, 'errors.log');
-        return null;
-    }
-}
+        $stmt = $pdo->prepare($query);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
 
-// Check payment restrictions
-function checkPaymentRestrictions($student_id, $category_id, $month, $year) {
-    global $pdo;
-    $categories = getCategories();
-    $category = array_filter($categories, fn($c) => $c['id'] == $category_id)[array_key_first(array_filter($categories, fn($c) => $c['id'] == $category_id))] ?? null;
-
-    if (!$category) {
-        return ['allowed' => false, 'message' => 'Category not found'];
-    }
-
-    $frequency = $category['payment_frequency'];
-    $max_amount = $category['max_amount'];
-
-    // One-time payment check
-    if (strpos($frequency, 'Одноразовая') !== false || strpos($frequency, 'Разовая') !== false || strpos($frequency, 'Единовременно') !== false) {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM StudentReasons WHERE student_id = ? AND category_id = ? AND YEAR(created_at) = ?");
-        $stmt->execute([$student_id, $category_id, $year]);
-        if ($stmt->fetchColumn() > 0) {
-            return ['allowed' => false, 'message' => 'One-time payment already made this year'];
-        }
-    }
-
-    // Monthly payment check
-    if (strpos($frequency, 'Ежемесячная') !== false) {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM StudentReasons WHERE student_id = ? AND category_id = ? AND month = ? AND YEAR(created_at) = ?");
-        $stmt->execute([$student_id, $category_id, $month, $year]);
-        if ($stmt->fetchColumn() > 0) {
-            return ['allowed' => false, 'message' => 'Payment for this month already made'];
-        }
-    }
-
-    // Quarterly payment check
-    if (strpos($frequency, '4 раза') !== false || strpos($frequency, '2 раза') !== false || strpos($frequency, 'Раз в семестр') !== false) {
-        $quarter = ceil($month / 3);
-        $quarterStartMonth = ($quarter - 1) * 3 + 1;
-        $quarterEndMonth = $quarter * 3;
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) 
-            FROM StudentReasons 
-            WHERE student_id = ? 
-            AND category_id = ? 
-            AND month BETWEEN ? AND ? 
-            AND YEAR(created_at) = ?
-        ");
-        $stmt->execute([$student_id, $category_id, $quarterStartMonth, $quarterEndMonth, $year]);
-        if ($stmt->fetchColumn() > 0) {
-            return ['allowed' => false, 'message' => 'Payment for this quarter already made'];
-        }
-    }
-
-    // Max amount check
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*) 
-        FROM StudentReasons 
-        WHERE student_id = ? 
-        AND category_id = ? 
-        AND YEAR(created_at) = ?
-    ");
-    $stmt->execute([$student_id, $category_id, $year]);
-    if ($stmt->fetchColumn() * 10000 >= $max_amount) {
-        return ['allowed' => false, 'message' => 'Payment limit exceeded for this category'];
-    }
-
-    return ['allowed' => true];
-}
-
-// Handle API requests
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json');
-    $action = $_POST['action'];
-    $current_year = date('Y');
-
-    if ($action === 'save_reason' || $action === 'update_reason') {
-        $student_id = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
-        $month = filter_input(INPUT_POST, 'month', FILTER_VALIDATE_INT);
-        $category_id = filter_input(INPUT_POST, 'category_id', FILTER_VALIDATE_INT) ?: null;
-        $custom_reason = trim($_POST['custom_reason'] ?? '');
-
-        if (!$student_id || !$month || $month < 1 || $month > 12 || ($custom_reason && strlen($custom_reason) > 255)) {
-            echo json_encode(['status' => 'error', 'message' => 'Invalid input data']);
-            exit;
-        }
-
-        if ($category_id) {
-            $restrictions = checkPaymentRestrictions($student_id, $category_id, $month, $current_year);
-            if (!$restrictions['allowed']) {
-                echo json_encode(['status' => 'error', 'message' => $restrictions['message']]);
-                exit;
+        $students = [];
+        foreach ($rows as $row) {
+            $student_id = $row['id'];
+            if (!isset($students[$student_id])) {
+                $students[$student_id] = [
+                    'id' => $row['id'],
+                    'full_name' => $row['full_name'],
+                    'budget' => $row['budget'],
+                    'group_name' => $row['group_name'],
+                    'school_name' => $row['school_name'],
+                    'category_id' => $row['category_id'],
+                    'amount' => $row['max_amount'] ?? '10000'
+                ];
             }
         }
 
-        try {
-            if ($action === 'save_reason') {
-                $stmt = $pdo->prepare("
-                    INSERT INTO StudentReasons (student_id, month, category_id, custom_reason, created_at)
-                    VALUES (?, ?, ?, ?, NOW())
-                    ON DUPLICATE KEY UPDATE category_id = ?, custom_reason = ?, created_at = NOW()
-                ");
-                $stmt->execute([$student_id, $month, $category_id, $custom_reason, $category_id, $custom_reason]);
-            } else {
-                $stmt = $pdo->prepare("
-                    UPDATE StudentReasons 
-                    SET category_id = ?, custom_reason = ?, created_at = NOW()
-                    WHERE student_id = ? AND month = ?
-                ");
-                $stmt->execute([$category_id, $custom_reason, $student_id, $month]);
-                if ($stmt->rowCount() === 0) {
-                    echo json_encode(['status' => 'error', 'message' => 'Record not found']);
-                    exit;
+        return array_values($students);
+    } catch (PDOException $e) {
+        return [];
+    }
+}
+
+// Fetch all students for modal
+function getAllStudents($search = '') {
+    global $pdo;
+    $query = "
+        SELECT 
+            s.id,
+            s.full_name,
+            s.budget,
+            g.group_name
+        FROM Students s
+        JOIN Groups g ON s.group_id = g.id
+        WHERE 1=1
+    ";
+    $params = [];
+
+    if ($search) {
+        $query .= " AND s.full_name LIKE ?";
+        $params[] = '%' . $search . '%';
+    }
+
+    $query .= " ORDER BY s.full_name";
+
+    $stmt = $pdo->prepare($query);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+// Unified POST handler with JSON responses
+$actions = [
+    'save_template' => function() {
+        foreach ($_POST['template'] as $placeholder => $value) {
+            if (preg_match('/^[A-Z_]+$/', $placeholder) && strlen($value) <= 1000) {
+                $_SESSION['template_vars'][$placeholder] = trim($value);
+            }
+        }
+        if (isset($_POST['template']['SCHOOL_CODE']) && is_numeric($_POST['template']['SCHOOL_CODE'])) {
+            $_SESSION['template_vars']['SCHOOL_CODE'] = (int)$_POST['template']['SCHOOL_CODE'];
+            global $pdo;
+            $stmt = $pdo->prepare("SELECT name FROM Schools WHERE code = ?");
+            $stmt->execute([$_SESSION['template_vars']['SCHOOL_CODE']]);
+            $school = $stmt->fetch();
+            if ($school) {
+                $_SESSION['template_vars']['SCHOOL'] = $school['name'];
+            }
+        }
+        // Combine day, month, and year into DATE
+        if (isset($_POST['template']['DAY'], $_POST['template']['MONTH'], $_POST['template']['YEAR'])) {
+            $day = trim($_POST['template']['DAY']);
+            $month = trim($_POST['template']['MONTH']);
+            $year = trim($_POST['template']['YEAR']);
+            $_SESSION['template_vars']['DATE'] = "«{$day}» {$month} {$year} г.";
+        }
+        setFlashMessage('Шаблон сохранён');
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'success', 'message' => 'Шаблон сохранён']);
+        exit;
+    },
+    'generate_protocol' => function() use ($pdo) {
+        $filename = trim($_POST['filename'] ?? '');
+        $format = $_POST['format'] ?? 'pdf';
+        $filters = [
+            'month' => trim($_POST['month'] ?? '')
+        ];
+
+        $extension = $format === 'word' ? 'docx' : 'pdf';
+        if ($filename && !validateFilename($filename, $extension)) {
+            header('Content-Type: application/json', true, 400);
+            echo json_encode(['status' => 'error', 'message' => 'Неверное имя файла']);
+            exit;
+        }
+        $filename = $filename ?: "protocol_7_2025.{$extension}";
+
+        // Fetch students
+        $students = getStudentCategories( $filters);
+        $templateVars = getTemplateVariables();
+
+        if ($format === 'word') {
+            require_once 'vendor/autoload.php';
+            $phpWord = new \PhpOffice\PhpWord\PhpWord();
+            $phpWord->setDefaultFontName('Times New Roman');
+            $phpWord->setDefaultFontSize(12);
+            $section = $phpWord->addSection([
+                'marginTop' => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2),
+                'marginBottom' => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2),
+                'marginLeft' => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(3),
+                'marginRight' => \PhpOffice\PhpWord\Shared\Converter::cmToTwip(1.5)
+            ]);
+
+            // Header
+            $section->addText("ПРОТОКОЛ № {$templateVars['PROTOCOL_NUMBER']}", ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 120]);
+            $section->addText('Заседания стипендиальной комиссии', ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 120]);
+            $section->addText($templateVars['SCHOOL'], ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 120]);
+            $section->addText($templateVars['UNIVERSITY'], ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 240]);
+
+            // Date and City
+            $table = $section->addTable(['width' => 100 * 50]);
+            $table->addRow();
+            $dateCell = $table->addCell(50 * 50);
+            $dateRun = $dateCell->addTextRun();
+            $dateRun->addText("«{$templateVars['DAY']}»", ['underline' => 'single']);
+            $dateRun->addText(" {$templateVars['MONTH']} {$templateVars['YEAR']} г.", ['size' => 12]);
+            $table->addCell(50 * 50)->addText("г. {$templateVars['CITY']}", ['size' => 12], ['alignment' => 'right']);
+            $section->addTextBreak(1, ['size' => 12], ['spaceAfter' => 240]);
+
+            // Sections
+            foreach ([
+                ['Председатель комиссии:', $templateVars['CHAIRPERSON']],
+                ['Члены комиссии:', $templateVars['MEMBERS'], true],
+                ['Секретарь комиссии:', $templateVars['SECRETARY']],
+                ['Повестка дня:', $templateVars['AGENDA']],
+                ['Слушали:', $templateVars['LISTENED']],
+                ['Решили:', $templateVars['DECISION']]
+            ] as $item) {
+                $section->addText($item[0], ['bold' => true, 'size' => 12], ['spaceAfter' => 60]);
+                $text = $item[1];
+                if ($item[2] ?? false) {
+                    foreach (explode("\n", $text) as $line) {
+                        $section->addText($line, ['size' => 12], ['spaceBefore' => 0, 'spaceAfter' => 0]);
+                    }
+                    $section->addTextBreak(1, ['size' => 12], ['spaceAfter' => 240]);
+                } else {
+                    $section->addText($text, ['size' => 12], ['spaceAfter' => 240]);
                 }
             }
-            echo json_encode(['status' => 'success']);
-        } catch (PDOException $e) {
-            error_log("Error in $action: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
 
-    if ($action === 'remove_reason') {
-        $student_id = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
-        $month = filter_input(INPUT_POST, 'month', FILTER_VALIDATE_INT);
+            $rfStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') !== 'ХМАО');
+            $hmaoStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
 
-        if (!$student_id || !$month || $month < 1 || $month > 12) {
-            echo json_encode(['status' => 'error', 'message' => 'Invalid data']);
+            // Tables
+            foreach ([['РФ', $rfStudents, 30], ['ХМАО', $hmaoStudents, 3]] as $group) {
+                $table = $section->addTable([
+                    'borderSize' => 6,
+                    'width' => 100 * 50,
+                    'unit' => 'pct'
+                ]);
+                $table->addRow();
+                $widths = [
+                    \PhpOffice\PhpWord\Shared\Converter::cmToTwip(0.5),
+                    \PhpOffice\PhpWord\Shared\Converter::cmToTwip(5),
+                    \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2),
+                    \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2),
+                    \PhpOffice\PhpWord\Shared\Converter::cmToTwip(5),
+                    \PhpOffice\PhpWord\Shared\Converter::cmToTwip(2)
+                ];
+                foreach (['№', 'ФИО', 'Бюджет', 'Группа', 'Основание', 'Сумма'] as $i => $header) {
+                    $table->addCell($widths[$i], ['valign' => 'center'])->addText($header, ['bold' => true, 'size' => 11], ['alignment' => 'center']);
+                }
+
+                if (empty($group[1])) {
+                    $table->addRow();
+                    $table->addCell($widths[0], ['valign' => 'center'])->addText('1', ['size' => 11], ['alignment' => 'center']);
+                    $table->addCell($widths[1], ['valign' => 'center'])->addText('Нет данных', ['size' => 11]);
+                    $table->addCell($widths[2], ['valign' => 'center'])->addText('-', ['size' => 11], ['alignment' => 'center']);
+                    $table->addCell($widths[3], ['valign' => 'center'])->addText('-', ['size' => 11], ['alignment' => 'center']);
+                    $table->addCell($widths[4], ['valign' => 'center'])->addText('Нет студентов', ['size' => 11]);
+                    $table->addCell($widths[5], ['valign' => 'center'])->addText('0', ['size' => 11], ['alignment' => 'center']);
+                } else {
+                    foreach (array_slice($group[1], 0, $group[2]) as $index => $student) {
+                        $reason = getCategoryName($student['category_id']) ?: 'Не указано';
+                        $table->addRow();
+                        $table->addCell($widths[0], ['valign' => 'center'])->addText($index + 1, ['size' => 11], ['alignment' => 'center']);
+                        $table->addCell($widths[1], ['valign' => 'center'])->addText($student['full_name'], ['size' => 11]);
+                        $table->addCell($widths[2], ['valign' => 'center'])->addText($student['budget'] ?: '-', ['size' => 11], ['alignment' => 'center']);
+                        $table->addCell($widths[3], ['valign' => 'center'])->addText($student['group_name'], ['size' => 11], ['alignment' => 'center']);
+                        $table->addCell($widths[4], ['valign' => 'center'])->addText($reason, ['size' => 11]);
+                        $table->addCell($widths[5], ['valign' => 'center'])->addText($student['amount'], ['size' => 11], ['alignment' => 'center']);
+                    }
+                }
+                $section->addTextBreak(1, ['size' => 12], ['spaceAfter' => 240]);
+            }
+
+            // Signatures
+            $section->addText("Руководитель инженерной школы цифровых технологий", ['size' => 12], ['spaceAfter' => 60]);
+            $section->addText($templateVars['CHAIR_DEGREE'], ['size' => 12], ['spaceAfter' => 60]);
+            $run = $section->addTextRun(['spaceAfter' => 240]);
+            $run->addText("____________________ ", ['underline' => 'single', 'size' => 12]);
+            $run->addText($templateVars['SIGN_CHAIR'], ['size' => 12]);
+
+            $section->addText("Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе", ['size' => 12], ['spaceAfter' => 60]);
+            $section->addText($templateVars['SECRETARY_DEGREE'], ['size' => 12], ['spaceAfter' => 60]);
+            $run = $section->addTextRun(['spaceAfter' => 240]);
+            $run->addText("____________________ ", ['underline' => 'single', 'size' => 12]);
+            $run->addText($templateVars['SIGN_SECRETARY'], ['size' => 12]);
+
+            $tempDir = 'generated/';
+            if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
+            $outputPath = $tempDir . $filename;
+            $writer = \PhpOffice\PhpWord\IOFactory::createWriter($phpWord, 'Word2007');
+            $writer->save($outputPath);
+
+            $fileContent = base64_encode(file_get_contents($outputPath));
+            unlink($outputPath);
+
+            header('Content-Type: application/json');
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Протокол сгенерирован',
+                'file' => $fileContent,
+                'filename' => $filename,
+                'contentType' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            ]);
             exit;
-        }
+        } else {
+            $templatePath = 'generated/template.tex';
+            if (!file_exists($templatePath)) {
+                header('Content-Type: application/json', true, 404);
+                echo json_encode(['status' => 'error', 'message' => 'Шаблон LaTeX не найден']);
+                exit;
+            }
+            $templateContent = file_get_contents($templatePath);
 
-        try {
-            $stmt = $pdo->prepare("DELETE FROM StudentReasons WHERE student_id = ? AND month = ?");
-            $stmt->execute([$student_id, $month]);
-            echo json_encode(['status' => 'success']);
-        } catch (PDOException $e) {
-            error_log("Error removing reason: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
+            $rfStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') !== 'ХМАО');
+            $hmaoStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
 
-    if ($action === 'add_academic_year') {
-        $year = trim($_POST['year'] ?? '');
-        if (!preg_match('/^(\d{4})-(\d{4})$/', $year, $matches)) {
-            echo json_encode(['status' => 'error', 'message' => 'Invalid academic year format (e.g., 2024-2025)']);
-            exit;
-        }
-        $start_year = (int)$matches[1];
-        $end_year = (int)$matches[2];
-        if ($end_year - $start_year !== 1) {
-            echo json_encode(['status' => 'error', 'message' => 'Academic year must span exactly one year']);
-            exit;
-        }
+            $studentListRf = '';
+            foreach (array_slice($rfStudents, 0, 30) as $index => $student) {
+                $reason = getCategoryName($student['category_id']) ?: 'Не указано';
+                $row = [
+                    'number' => $index + 1,
+                    'fio' => addslashes($student['full_name']),
+                    'budget' => addslashes($student['budget'] ?: '-'),
+                    'group' => addslashes($student['group_name']),
+                    'reason' => addslashes($reason),
+                    'amount' => $student['amount']
+                ];
+                $studentListRf .= "{$row['number']} & {$row['fio']} & {$row['budget']} & {$row['group']} & {$row['reason']} & {$row['amount']} \\\\\n";
+            }
+            if (empty($studentListRf)) {
+                $studentListRf = "1 & Нет данных & - & - & Нет студентов & 0 \\\\\n";
+            }
 
-        try {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM AcademicYears WHERE year = ?");
-            $stmt->execute([$year]);
-            if ($stmt->fetchColumn() > 0) {
-                echo json_encode(['status' => 'error', 'message' => 'Academic year already exists']);
+            $studentListHmao = '';
+            foreach (array_slice($hmaoStudents, 0, 3) as $index => $student) {
+                $reason = getCategoryName($student['category_id']) ?: 'Не указано';
+                $row = [
+                    'number' => $index + 1,
+                    'fio' => addslashes($student['full_name']),
+                    'budget' => addslashes($student['budget'] ?: '-'),
+                    'group' => addslashes($student['group_name']),
+                    'reason' => addslashes($reason),
+                    'amount' => $student['amount']
+                ];
+                $studentListHmao .= "{$row['number']} & {$row['fio']} & {$row['budget']} & {$row['group']} & {$row['reason']} & {$row['amount']} \\\\\n";
+            }
+            if (empty($studentListHmao)) {
+                $studentListHmao = "1 & Нет данных & - & - & Нет студентов & 0 \\\\\n";
+            }
+
+            $latexContent = str_replace(['{STUDENT_LIST_RF}', '{STUDENT_LIST_HMAO}'], [rtrim($studentListRf, "\n"), rtrim($studentListHmao, "\n")], $templateContent);
+            foreach ($templateVars as $placeholder => $value) {
+                $latexContent = str_replace("{{$placeholder}}", addslashes($value), $latexContent);
+            }
+
+            $tempDir = 'generated/';
+            if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
+            $tempTexPath = $tempDir . 'temp_protocol.tex';
+            file_put_contents($tempTexPath, $latexContent);
+
+            $outputPath = $tempDir . $filename;
+            $command = "latexmk -pdf -output-directory=$tempDir $tempTexPath 2>&1";
+            exec($command, $output, $returnCode);
+
+            if ($returnCode !== 0 || !file_exists($outputPath)) {
+                header('Content-Type: application/json', true, 500);
+                echo json_encode(['status' => 'error', 'message' => 'Ошибка компиляции LaTeX']);
                 exit;
             }
 
-            $stmt = $pdo->prepare("INSERT INTO AcademicYears (year) VALUES (?)");
-            $stmt->execute([$year]);
-            echo json_encode(['status' => 'success', 'year' => $year]);
-        } catch (PDOException $e) {
-            error_log("Error adding academic year: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
+            $fileContent = base64_encode(file_get_contents($outputPath));
+            unlink($tempTexPath);
+            unlink($outputPath);
+            array_map('unlink', glob($tempDir . 'temp_protocol.*'));
 
-    if ($action === 'add_student_to_default_category') {
-        $student_id = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
-
-        if (!$student_id) {
-            echo json_encode(['status' => 'error', 'message' => 'Invalid student ID']);
+            header('Content-Type: application/json');
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Протокол сгенерирован',
+                'file' => $fileContent,
+                'filename' => $filename,
+                'contentType' => 'application/pdf'
+            ]);
             exit;
         }
-
-        try {
-            // Get the most recent academic year
-            $academic_year = getMostRecentAcademicYear();
-            if (!$academic_year) {
-                echo json_encode(['status' => 'error', 'message' => 'No academic year found']);
-                exit;
-            }
-
-            // Use a default category (e.g., first category or a specific one)
-            $stmt = $pdo->query("SELECT id FROM categories ORDER BY id LIMIT 1");
-            $category = $stmt->fetch();
-            if (!$category) {
-                echo json_encode(['status' => 'error', 'message' => 'No categories found']);
-                exit;
-            }
-            $category_id = $category['id'];
-
-            // Add student to category
-            $stmt = $pdo->prepare("
-                INSERT IGNORE INTO StudentCategories (student_id, category_id, academic_year, created_at)
-                VALUES (?, ?, ?, NOW())
-            ");
-            $stmt->execute([$student_id, $category_id, $academic_year]);
-            echo json_encode(['status' => 'success', 'message' => 'Student added to default category']);
-        } catch (PDOException $e) {
-            error_log("Error adding student to default category: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
-
-    if ($action === 'remove_student_from_category') {
-        $student_id = filter_input(INPUT_POST, 'student_id', FILTER_VALIDATE_INT);
-        $category_id = filter_input(INPUT_POST, 'category_id', FILTER_VALIDATE_INT);
-        $academic_year = trim($_POST['academic_year'] ?? '');
+    },
+    'add_student_category' => function() use ($pdo) {
+        $student_id = $_POST['student_id'] ?? null;
+        $category_id = $_POST['category_id'] ?? null;
+        $academic_year = $_POST['academic_year'] ?? null;
 
         if (!$student_id || !$category_id || !$academic_year) {
-            echo json_encode(['status' => 'error', 'message' => 'Invalid data']);
+            header('Content-Type: application/json', true, 400);
+            echo json_encode(['status' => 'error', 'message' => 'Недостаточно данных']);
             exit;
         }
 
         try {
-            $stmt = $pdo->prepare("
-                DELETE FROM StudentCategories 
-                WHERE student_id = ? AND category_id = ? AND academic_year = ?
-            ");
+            $stmt = $pdo->prepare("INSERT INTO StudentCategories (student_id, category_id, academic_year) VALUES (?, ?, ?)");
             $stmt->execute([$student_id, $category_id, $academic_year]);
-
-            if ($stmt->rowCount() > 0) {
-                echo json_encode(['status' => 'success', 'message' => 'Student removed from category']);
-            } else {
-                echo json_encode(['status' => 'error', 'message' => 'Record not found']);
-            }
+            header('Content-Type: application/json');
+            echo json_encode(['status' => 'success', 'message' => 'Студент добавлен в категорию']);
+            exit;
         } catch (PDOException $e) {
-            error_log("Error removing student from category: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
+            header('Content-Type: application/json', true, 500);
+            echo json_encode(['status' => 'error', 'message' => 'Ошибка добавления студента']);
+            exit;
         }
-        exit;
-    }
+    },
+    'update_student' => function() use ($pdo) {
+        $student_id = $_POST['student_id'] ?? null;
+        $full_name = trim($_POST['full_name'] ?? '');
+        $budget = trim($_POST['budget'] ?? '');
+        $group_name = trim($_POST['group_name'] ?? '');
 
-    if ($action === 'reset_student_categories') {
-        try {
-            $pdo->beginTransaction();
-            $stmt = $pdo->prepare("DELETE FROM StudentCategories");
-            $stmt->execute();
-            $pdo->commit();
-            echo json_encode(['status' => 'success', 'message' => 'All student categories cleared']);
-        } catch (PDOException $e) {
-            $pdo->rollBack();
-            error_log("Error resetting student categories: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
-
-    if ($action === 'get_students') {
-        $schools = json_decode($_POST['schools'] ?? '[]', true);
-        $years = json_decode($_POST['years'] ?? '[]', true);
-        $regions = json_decode($_POST['regions'] ?? '[]', true);
-        $fio = trim($_POST['fio'] ?? '');
-
-        $query = "
-            SELECT 
-                s.id, 
-                s.full_name, 
-                s.budget, 
-                g.group_name,
-                d.direction_name,
-                sr.month, 
-                sr.category_id, 
-                sr.custom_reason
-            FROM Students s
-            JOIN Groups g ON s.group_id = g.id
-            JOIN Directions d ON g.direction_id = d.code
-            JOIN Schools sc ON d.vsh_code = sc.code
-            JOIN StudentCategories scs ON s.id = scs.student_id
-            LEFT JOIN StudentReasons sr ON s.id = sr.student_id
-            WHERE 1=1
-        ";
-
-        $params = [];
-
-        if (!empty($schools) && !in_array('', $schools)) {
-            $query .= " AND sc.code IN (" . implode(',', array_fill(0, count($schools), '?')) . ")";
-            $params = array_merge($params, $schools);
-        }
-
-        if (!empty($years) && !in_array('', $years)) {
-            $query .= " AND scs.academic_year IN (" . implode(',', array_fill(0, count($years), '?')) . ")";
-            $params = array_merge($params, $years);
-        }
-
-        if (!empty($regions) && !in_array('none', $regions)) {
-            $query .= " AND s.budget IN (" . implode(',', array_fill(0, count($regions), '?')) . ")";
-            $params = array_merge($params, $regions);
-        }
-
-        if (!empty($fio)) {
-            $query .= " AND s.full_name LIKE ?";
-            $params[] = "%$fio%";
-        }
-
-        try {
-            $stmt = $pdo->prepare($query);
-            $stmt->execute($params);
-            $rows = $stmt->fetchAll();
-
-            $students = [];
-            foreach ($rows as $row) {
-                $student_id = $row['id'];
-                if (!isset($students[$student_id])) {
-                    $students[$student_id] = [
-                        'id' => $row['id'],
-                        'full_name' => $row['full_name'],
-                        'budget' => $row['budget'],
-                        'group_name' => $row['group_name'],
-                        'direction_name' => $row['direction_name'],
-                        'reasons' => []
-                    ];
-                }
-                if ($row['month']) {
-                    $reason_text = $row['custom_reason'] ?: ($row['category_id'] ? getCategoryName($row['category_id']) : '');
-                    $students[$student_id]['reasons'][$row['month']] = $reason_text;
-                }
-            }
-
-            echo json_encode(['status' => 'success', 'data' => array_values($students), 'total' => count($students)]);
-        } catch (PDOException $e) {
-            error_log("Error loading students: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
-
-    if ($action === 'get_all_students') {
-        $fio = trim($_POST['fio'] ?? '');
-
-        $query = "
-            SELECT 
-                s.id, 
-                s.full_name, 
-                s.budget, 
-                g.group_name
-            FROM Students s
-            JOIN Groups g ON s.group_id = g.id
-            WHERE 1=1
-        ";
-
-        $params = [];
-
-        if (!empty($fio)) {
-            $query .= " AND s.full_name LIKE ?";
-            $params[] = "%$fio%";
-        }
-
-        try {
-            $stmt = $pdo->prepare($query);
-            $stmt->execute($params);
-            $students = $stmt->fetchAll();
-            echo json_encode(['status' => 'success', 'data' => $students, 'total' => count($students)]);
-        } catch (PDOException $e) {
-            error_log("Error loading all students: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
-        }
-        exit;
-    }
-
-    if ($action === 'get_category_by_number') {
-        $number = trim($_POST['number'] ?? '');
-        if (!$number) {
-            echo json_encode(['status' => 'error', 'message' => 'Number is required']);
+        if (!$student_id || !$full_name || !$group_name) {
+            header('Content-Type: application/json', true, 400);
+            echo json_encode(['status' => 'error', 'message' => 'Недостаточно данных']);
             exit;
         }
 
         try {
-            $stmt = $pdo->prepare("SELECT id, category_short, category_name FROM categories WHERE number = ?");
-            $stmt->execute([$number]);
-            $category = $stmt->fetch();
-            if ($category) {
-                echo json_encode(['status' => 'success', 'data' => $category]);
+            // Update student details
+            $stmt = $pdo->prepare("UPDATE Students SET full_name = ?, budget = ? WHERE id = ?");
+            $stmt->execute([$full_name, $budget, $student_id]);
+
+            // Update group
+            $stmt = $pdo->prepare("SELECT id FROM Groups WHERE group_name = ?");
+            $stmt->execute([$group_name]);
+            $group = $stmt->fetch();
+
+            if ($group) {
+                $stmt = $pdo->prepare("UPDATE Students SET group_id = ? WHERE id = ?");
+                $stmt->execute([$group['id'], $student_id]);
             } else {
-                echo json_encode(['status' => 'error', 'message' => 'Category not found']);
+                header('Content-Type: application/json', true, 400);
+                echo json_encode(['status' => 'error', 'message' => 'Группа не найдена']);
+                exit;
             }
+
+            header('Content-Type: application/json');
+            echo json_encode(['status' => 'success', 'message' => 'Данные студента обновлены']);
+            exit;
         } catch (PDOException $e) {
-            error_log("Error fetching category by number: " . $e->getMessage(), 3, 'errors.log');
-            echo json_encode(['status' => 'error', 'message' => 'Database error']);
+            header('Content-Type: application/json', true, 500);
+            echo json_encode(['status' => 'error', 'message' => 'Ошибка обновления данных']);
+            exit;
         }
+    },
+    'get_students' => function() {
+        $search = $_GET['search'] ?? '';
+        $students = getAllStudents($search);
+        header('Content-Type: application/json');
+        echo json_encode($students);
+        exit;
+    },
+    'get_student_categories' => function() {
+        $filters = [
+            'search' => $_GET['search'] ?? ''
+        ];
+        $students = getStudentCategories($filters);
+        header('Content-Type: application/json');
+        echo json_encode($students);
         exit;
     }
+];
 
-    echo json_encode(['status' => 'error', 'message' => 'Invalid action']);
-    exit;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && isset($actions[$_POST['action']])) {
+    $actions[$_POST['action']]();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && isset($actions[$_GET['action']])) {
+    $actions[$_GET['action']]();
 }
 
 // Load interface data
-try {
-    $stmt = $pdo->query("SELECT code, name, abbreviation FROM Schools ORDER BY name");
-    $schools = $stmt->fetchAll();
+$schools = $pdo->query("SELECT code, name FROM Schools ORDER BY name")->fetchAll();
+$years = $pdo->query("SELECT year FROM AcademicYears ORDER BY year DESC")->fetchAll(PDO::FETCH_COLUMN);
+$categories = getCategories();
+$templateVars = getTemplateVariables();
 
-    $stmt = $pdo->query("SELECT year FROM AcademicYears ORDER BY year DESC");
-    $years = array_column($stmt->fetchAll(), 'year');
-
-    $categories = getCategories();
-} catch (PDOException $e) {
-    error_log("Error-loading data: " . $e->getMessage(), 3, 'errors.log');
-    http_response_code(500);
-    die(json_encode(['status' => 'error', 'message' => 'Server error']));
-}
+// Get filter values
+$filters = [
+    'search' => trim($_GET['search'] ?? '')
+];
+$studentCategories = getStudentCategories($filters);
 ?>
 
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+    <?php include 'header.html'; ?>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Система документооборота</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <title>Система документооборота - ЮГУ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <style>
+        :root {
+            --ygu-black: #000000;
+            --ygu-light-black: #000000;
+            --ygu-gray: #eceff1;
+            --ygu-dark-gray: #37474f;
+            --ygu-blue: rgb(76, 84, 175);
+            --ygu-light-blue: rgb(76, 84, 175);
+        }
+
         body {
-            font-family: 'Montserrat', sans-serif;
-            background-color: #f5f6fa;
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(to bottom, var(--ygu-gray), #ffffff);
+            color: var(--ygu-dark-gray);
         }
 
         .container {
             max-width: 1600px;
+            padding: 20px;
+            margin-top: 20px;
+            margin-left: 10px;
         }
 
+        .main-row {
+            display: flex;
+            gap: 20px;
+        }
+
+        .sidebar {
+            flex: 0 0 300px;
+        }
+
+        .content {
+            flex: 1;
+        }
+
+        .card {
+            border: none;
+            border-radius: 10px;
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 15px;
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            background: var(--ygu-blue);
+            color: #ffffff;
+            padding: 10px 15px;
+            border-radius: 10px 10px 0 0;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .card-header h4 {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .card-body {
+            padding: 15px;
+            border-radius: 0 0 10px 10px;
+        }
+
+        .card.collapsed .card-body {
+            display: none;
+        }
+
+        .toggle-icon::before {
+            content: '▼';
+            font-size: 0.9rem;
+        }
+
+        .card.collapsed .toggle-icon::before {
+            content: '▶';
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            background: #ffffff;
+            z-index: 1000;
+            font-size: 0.9rem;
+        }
+
+        .notification.success {
+            border-left: 4px solid var(--ygu-light-blue);
+        }
+
+        .notification.error {
+            border-left: 4px solid #d32f2f;
+        }
+
+        .form-select, .form-control {
+            border-radius: 6px;
+            padding: 8px;
+            font-size: 0.85rem;
+            border: 1px solid #b0bec5;
+        }
+
+        .form-select:focus, .form-control:focus {
+            border-color: var(--ygu-light-black);
+            box-shadow: 0 0 0 0.2rem rgba(0, 0, 0, 0);
+        }
+
+        .btn-primary {
+            background: var(--ygu-black);
+            border-color: var(--ygu-black);
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+
+        .btn-primary:hover {
+            background: var(--ygu-light-black);
+            border-color: var(--ygu-light-black);
+        }
+
+        .btn-outline-secondary {
+            border-color: var(--ygu-dark-gray);
+            color: var(--ygu-dark-gray);
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+        }
+
+        .btn-outline-secondary:hover {
+            background: var(--ygu-gray);
+            border-color: var(--ygu-dark-gray);
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 0.8rem;
+        }
+
+        .preview-container {
+            background: #ffffff;
+            border: 1px solid #000000;
+            width: 210mm;
+            min-height: 297mm;
+            margin: 15px auto;
+            padding: 20mm 15mm;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            font-family: 'Times New Roman', serif;
+            font-size: 12pt;
+            line-height: 1.5;
+        }
+
+        .preview h1, .preview h2 {
+            font-size: 14pt;
+            font-weight: bold;
+            text-align: center;
+            margin: 0;
+            padding: 0.5em 0;
+            color: #000000;
+        }
+
+        .preview p {
+            margin: 0;
+            padding: 0.5em 0;
+            line-height: 1.5;
+        }
+
+        .preview .section-title {
+            font-weight: bold;
+            padding-top: 1em;
+            padding-bottom: 0.2em;
+            color: #000000;
+        }
+
+        .preview .members {
+            white-space: pre-wrap;
+            padding-bottom: 0.5em;
+        }
+
+        .preview .date-city {
+            display: flex;
+            justify-content: space-between;
+            padding: 1em 0;
+            font-size: 12pt;
+        }
+
+        .preview .date-day {
+            text-decoration: underline;
+        }
+
+        .preview .city {
+            text-align: right;
+        }
+
+        .preview table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+            border: 1px solid #000000;
+            font-size: 11pt;
+        }
+
+        .preview th, .preview td {
+            border: 1px solid #000000;
+            padding: 8px;
+            vertical-align: middle;
+        }
+
+        .preview th {
+            background: #eceff1;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .preview td.number, .preview td.amount, .preview td.budget, .preview td.group {
+            text-align: center;
+        }
+
+        .preview .signatures {
+            padding-top: 2em;
+        }
+
+        .preview .signature {
+            padding-bottom: 1.5em;
+        }
+
+        .preview .signature-line {
+            display: inline-block;
+            width: 40mm;
+            border-bottom: 1px solid #000000;
+            vertical-align: bottom;
+            margin-left: 10px;
+        }
+
+        .sidebar .card {
+            margin-bottom: 12px;
+        }
+
+        .sidebar .card-header {
+            padding: 8px 12px;
+        }
+
+        .sidebar .card-body {
+            padding: 12px;
+        }
+
+        .sidebar .form-label {
+            font-size: 0.85rem;
+            color: var(--ygu-dark-gray);
+        }
+
+        .sidebar .form-control, .sidebar .form-select {
+            font-size: 0.8rem;
+        }
+
+        h2 {
+            color: var(--ygu-blue);
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        @media (max-width: 1200px) {
+            .main-row {
+                flex-direction: column;
+            }
+            .sidebar {
+                flex: 0 0 100%;
+            }
+            .preview-container {
+                width: 100%;
+                padding: 15mm;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+                margin-left: 0;
+            }
+        }
+
+        /* Styles for student table and modal */
         .filter-bar {
             display: flex;
             flex-wrap: wrap;
@@ -488,7 +859,7 @@ try {
             box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         }
 
-        .filter-group, .school-year-group {
+        .filter-group {
             flex: 1;
             min-width: 200px;
         }
@@ -507,28 +878,27 @@ try {
             color: #6c757d;
         }
 
-        .dropdown-toggle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            width: 100%;
-            padding: 10px 14px;
+        .budget-filter-btn {
+            padding: 8px 12px;
             border: 1px solid #e0e0e0;
             border-radius: 6px;
             background-color: #fff;
             cursor: pointer;
-            transition: border-color 0.2s;
+            transition: all 0.2s;
+            margin-right: 8px;
+            font-weight: 500;
+            font-size: 0.85rem;
         }
 
-        .dropdown-toggle:hover {
-            border-color: #007bff;
+        .budget-filter-btn.active {
+            background-color: var(--ygu-blue);
+            color: #fff;
+            border-color: var(--ygu-blue);
         }
 
-        .dropdown-menu {
-            width: 100%;
-            padding: 12px;
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        .budget-filter-btn:hover {
+            background-color: #e6f3ff;
+            border-color: #0056b3;
         }
 
         .current-filters {
@@ -536,95 +906,6 @@ try {
             font-size: 0.95rem;
             color: #495057;
             font-weight: 500;
-        }
-
-        .table-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .data-table {
-            width: 100%;
-            background-color: #ffffff;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            border-collapse: separate;
-            border-spacing: 0;
-            overflow: hidden;
-        }
-
-        .data-table th {
-            position: sticky;
-            top: 0;
-            background-color: #ffffff;
-            color: #000000;
-            font-weight: 600;
-            padding: 12px;
-            border-right: 1px solid #e9ecef;
-            text-align: center;
-            z-index: 10;
-        }
-
-        .data-table th:last-child {
-            border-right: none;
-        }
-
-        .data-table td {
-            padding: 10px;
-            border-bottom: 1px solid #e9ecef;
-            border-right: 1px solid #e9ecef;
-            vertical-align: middle;
-            text-align: center;
-        }
-
-        .data-table td:last-child {
-            border-right: none;
-        }
-
-        .data-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .data-table tr {
-            transition: background-color 0.2s;
-        }
-
-        .data-table tr:hover {
-            background-color: #f1f3f5;
-        }
-
-        .data-table .month-checkbox {
-            cursor: pointer;
-        }
-
-        .data-table .month-checkbox:disabled {
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-
-        .table-responsive {
-            position: relative;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-
-        .table-loading {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255,255,255,0.8);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 20;
-        }
-
-        .table-loading.show {
-            display: flex;
         }
 
         .notification-container {
@@ -688,6 +969,19 @@ try {
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
 
+        .modal.no-backdrop {
+            background: transparent;
+        }
+
+        .modal-dialog {
+            margin: 1.75rem auto;
+            max-width: 600px;
+        }
+
+        .modal-dialog.modal-lg {
+            max-width: 800px;
+        }
+
         .error-message {
             color: #dc3545;
             font-size: 0.9rem;
@@ -703,1020 +997,544 @@ try {
         .modal-body textarea {
             border-radius: 6px;
         }
+
+        .student-search-container {
+            position: relative;
+        }
+
+        .student-search-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background-color: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+
+        .student-search-dropdown.show {
+            display: block;
+        }
+
+        .student-search-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .student-search-item:hover {
+            background-color: #f1f3f5;
+        }
+
+        .student-search-item .student-full-name {
+            font-weight: 600;
+            color: #007bff;
+        }
+
+        .student-search-item .student-group {
+            color: #495057;
+        }
+
+        .student-search-item .student-budget {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        .student-row {
+            cursor: pointer;
+        }
+
+        .student-row:hover {
+            background-color: #f1f3f5;
+        }
     </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            const monthMap = <?php echo json_encode($monthMap); ?>;
+            let studentsData = <?php echo json_encode($studentCategories); ?>;
+            let selectedMonth = $('#MONTH').val();
+            const defaultCategoryId = <?php echo json_encode($categories[0]['id'] ?? 1); ?>;
+            const defaultAcademicYear = <?php echo json_encode($years[0] ?? '2024-2025'); ?>;
+
+            $('.card-header').click(function() {
+                $(this).closest('.card').toggleClass('collapsed');
+            });
+
+            function showNotification(message, type) {
+                const $notification = $(`
+                    <div class="notification ${type} show">
+                        <span class="icon">${type === 'success' ? '✅' : '❌'}</span>
+                        <span class="message">${message}</span>
+                        <button class="close-btn">×</button>
+                    </div>
+                `);
+                $('.notification-container').append($notification);
+                setTimeout(() => {
+                    $notification.addClass('hide');
+                    setTimeout(() => $notification.remove(), 300);
+                }, 5000);
+                $notification.find('.close-btn').click(() => {
+                    $notification.addClass('hide');
+                    setTimeout(() => $notification.remove(), 300);
+                });
+            }
+
+            function updatePreview() {
+                $('.template-input').each(function() {
+                    const placeholder = $(this).data('placeholder');
+                    const value = $(this).val().trim() || `{${placeholder}}`;
+                    $(`.preview [data-placeholder="${placeholder}"]`).text(value);
+                });
+                const day = $('#DAY').val().trim() || 'DAY';
+                const month = $('#MONTH').val().trim() || 'MONTH';
+                const year = $('#YEAR').val().trim() || 'YEAR';
+                $(`.preview [data-placeholder="DATE"]`).html(`<span class="date-day">«${day}»</span> ${month} ${year} г.`);
+                updateStudentTables(studentsData);
+            }
+
+            function updateStudentTables(students) {
+                const rfStudents = students.filter(s => (s.budget || '-').toUpperCase() !== 'ХМАО');
+                const hmaoStudents = students.filter(s => (s.budget || '-').toUpperCase() === 'ХМАО');
+
+                // Update RF table
+                const $rfTableBody = $('.preview .rf-table tbody');
+                $rfTableBody.empty();
+                if (rfStudents.length === 0) {
+                    $rfTableBody.append(`
+                        <tr>
+                            <td class="number">1</td>
+                            <td>Нет данных</td>
+                            <td class="budget">-</td>
+                            <td class="group">-</td>
+                            <td>Нет студентов</td>
+                            <td class="amount">0</td>
+                        </tr>
+                    `);
+                } else {
+                    rfStudents.slice(0, 30).forEach((student, index) => {
+                        const reason = student.category_id ? '<?php echo addslashes(getCategoryName(' + student.category_id + ')); ?>' : 'Не указано';
+                        $rfTableBody.append(`
+                            <tr>
+                                <td class="number">${index + 1}</td>
+                                <td>${$('<div/>').text(student.full_name).html()}</td>
+                                <td class="budget">${$('<div/>').text(student.budget || '-').html()}</td>
+                                <td class="group">${$('<div/>').text(student.group_name).html()}</td>
+                                <td>${$('<div/>').text(reason).html()}</td>
+                                <td class="amount">${$('<div/>').text(student.amount).html()}</td>
+                            </tr>
+                        `);
+                    });
+                }
+
+                // Update HMAO table
+                const $hmaoTableBody = $('.preview .hmao-table tbody');
+                $hmaoTableBody.empty();
+                if (hmaoStudents.length === 0) {
+                    $hmaoTableBody.append(`
+                        <tr>
+                            <td class="number">1</td>
+                            <td>Нет данных</td>
+                            <td class="budget">-</td>
+                            <td class="group">-</td>
+                            <td>Нет студентов</td>
+                            <td class="amount">0</td>
+                        </tr>
+                    `);
+                } else {
+                    hmaoStudents.slice(0, 3).forEach((student, index) => {
+                        const reason = student.category_id ? '<?php echo addslashes(getCategoryName(' + student.category_id + ')); ?>' : 'Не указано';
+                        $hmaoTableBody.append(`
+                            <tr>
+                                <td class="number">${index + 1}</td>
+                                <td>${$('<div/>').text(student.full_name).html()}</td>
+                                <td class="budget">${$('<div/>').text(student.budget || '-').html()}</td>
+                                <td class="group">${$('<div/>').text(student.group_name).html()}</td>
+                                <td>${$('<div/>').text(reason).html()}</td>
+                                <td class="amount">${$('<div/>').text(student.amount).html()}</td>
+                            </tr>
+                        `);
+                    });
+                }
+            }
+
+            $('#SCHOOL_CODE').on('change', function() {
+                const schoolName = $(this).find('option:selected').text();
+                $('#SCHOOL').val(schoolName);
+                updatePreview();
+            });
+
+            $('#MONTH').on('change', function() {
+                selectedMonth = $(this).val();
+                updatePreview();
+            });
+
+            $('#format').change(function() {
+                const format = $(this).val();
+                $('#filename').attr('placeholder', `protocol_7_2025.${format === 'word' ? 'docx' : 'pdf'}`);
+            });
+
+            $('.ajax-form').on('submit', function(e) {
+                e.preventDefault();
+                const $form = $(this);
+                const action = $form.find('input[name="action"]').val();
+                const formData = $form.serializeArray();
+                const filters = {
+                    month: $('#MONTH').val() || ''
+                };
+                formData.push({ name: 'month', value: filters.month });
+
+                $.ajax({
+                    url: '',
+                    method: 'POST',
+                    data: formData,
+                    dataType: 'json',
+                    success: function(response) {
+                        showNotification(response.message, response.status);
+                        if (action === 'generate_protocol' && response.file) {
+                            const link = document.createElement('a');
+                            link.href = `data:${response.contentType};base64,${response.file}`;
+                            link.download = response.filename;
+                            link.click();
+                        }
+                    },
+                    error: function(xhr) {
+                        const response = xhr.responseJSON || { message: 'Ошибка сервера', status: 'error' };
+                        showNotification(response.message, response.status);
+                    }
+                });
+            });
+
+            $('.template-input').on('input change', function() {
+                const placeholder = $(this).data('placeholder');
+                const value = $(this).val().trim();
+                if (value.length > 1000) {
+                    showNotification('Максимум 1000 символов', 'error');
+                    $(this).val(value.substring(0, 1000));
+                }
+                updatePreview();
+            });
+
+            // Load students in modal
+            function loadStudents(search = '') {
+                $.ajax({
+                    url: '',
+                    method: 'GET',
+                    data: { action: 'get_students', search: search },
+                    dataType: 'json',
+                    success: function(students) {
+                        const $tbody = $('#student-selection-table');
+                        $tbody.empty();
+                        students.forEach(student => {
+                            $tbody.append(`
+                                <tr class="student-row" data-student-id="${student.id}">
+                                    <td>${$('<div/>').text(student.full_name).html()}</td>
+                                    <td>${$('<div/>').text(student.group_name).html()}</td>
+                                    <td>${$('<div/>').text(student.budget || '-').html()}</td>
+                                </tr>
+                            `);
+                        });
+                    },
+                    error: function() {
+                        showNotification('Ошибка загрузки студентов', 'error');
+                    }
+                });
+            }
+
+            $('#selectStudentsModal').on('shown.bs.modal', function() {
+                loadStudents();
+            });
+
+            $('#student-search').on('input', function() {
+                const search = $(this).val().trim();
+                loadStudents(search);
+            });
+
+            $(document).on('click', '.student-row', function() {
+                const studentId = $(this).data('student-id');
+                $.ajax({
+                    url: '',
+                    method: 'POST',
+                    data: {
+                        action: 'add_student_category',
+                        student_id: studentId,
+                        category_id: defaultCategoryId,
+                        academic_year: defaultAcademicYear
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        showNotification(response.message, response.status);
+                        if (response.status === 'success') {
+                            $.get('', { action: 'get_student_categories' }, function(data) {
+                                studentsData = data;
+                                updatePreview();
+                            }, 'json');
+                            $('#selectStudentsModal').modal('hide');
+                        }
+                    },
+                    error: function() {
+                        showNotification('Ошибка добавления студента', 'error');
+                    }
+                });
+            });
+
+            // Initial setup
+            updatePreview();
+        });
+    </script>
 </head>
 <body>
-    <?php
-    $header_file = 'header.html';
-    if (file_exists($header_file)) {
-        include $header_file;
-    } else {
-        ?>
-        <header>
-            <nav class="navbar navbar-expand-md navbar-dark bg-primary">
-                <div class="container-fluid">
-                    <a class="navbar-brand" href="/index.php">Система документооборота</a>
-                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                        <span class="navbar-toggler-icon"></span>
-                    </button>
-                    <div class="collapse navbar-collapse" id="navbarNav">
-                        <ul class="navbar-nav ms-auto">
-                            <li class="nav-item">
-                                <a class="nav-link" href="/index.php">Список студентов</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="/schools.php">Высшие школы</a>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </nav>
-        </header>
-        <?php
-    }
-    ?>
-    <div class="container mt-4">
-        <h2>Список студентов</h2>
-        <div class="filter-bar">
-            <div class="school-year-group">
-                <select id="school-filter" class="form-select">
-                    <option value="">Все школы</option>
-                    <?php foreach ($schools as $school): ?>
-                        <option value="<?php echo htmlspecialchars($school['code']); ?>">
-                            <?php echo htmlspecialchars($school['name']); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <select id="year-filter" class="form-select mt-2">
-                    <option value="">Все годы</option>
-                    <?php foreach ($years as $year): ?>
-                        <option value="<?php echo htmlspecialchars($year); ?>">
-                            <?php echo htmlspecialchars($year); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <button class="btn btn-primary btn-sm mt-2" data-bs-toggle="modal" data-bs-target="#addYearModal">
-                    <i class="bi bi-plus-circle"></i> Добавить учебный год
-                </button>
-            </div>
-            <div class="filter-group">
-                <div class="dropdown">
-                    <button class="dropdown-toggle" id="sort-region-toggle">
-                        <i class="bi bi-funnel"></i> Бюджет
-                        <span class="badge bg-secondary" id="region-filter-count" style="display: none;">0</span>
-                    </button>
-                    <div class="dropdown-menu" id="sort-region-menu">
-                        <label class="d-block">
-                            <input type="checkbox" class="region-checkbox" value="none"> Нет
-                        </label>
-                        <label class="d-block">
-                            <input type="checkbox" class="region-checkbox" value="РФ"> РФ
-                        </label>
-                        <label class="d-block">
-                            <input type="checkbox" class="region-checkbox" value="ХМАО"> ХМАО
-                        </label>
-                    </div>
-                </div>
-                <button class="btn btn-outline-secondary btn-sm mt-2" id="reset-filters">
-                    <i class="bi bi-x-circle"></i> Сбросить
-                </button>
-            </div>
-            <div class="fio-search-container">
-                <input type="text" id="fio-search" class="form-control" placeholder="Поиск по ФИО студента">
-                <i class="bi bi-search fio-search-icon"></i>
-            </div>
-        </div>
-        <div class="current-filters" id="current-filters">
-            Фильтры: Нет активных фильтров
-        </div>
-        <div class="table-header">
-            <span id="student-count">Студентов: 0</span>
-            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#selectStudentsModal">
-                <i class="bi bi-person-plus"></i> Добавить студентов
-            </button>
-        </div>
-        <div class="table-responsive position-relative">
-            <table class="table data-table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>ФИО</th>
-                        <th>Группа</th>
-                        <th>Бюджет</th>
-                        <th>Январь</th>
-                        <th>Февраль</th>
-                        <th>Март</th>
-                        <th>Апрель</th>
-                        <th>Май</th>
-                        <th>Июнь</th>
-                        <th>Июль</th>
-                        <th>Август</th>
-                        <th>Сентябрь</th>
-                        <th>Октябрь</th>
-                        <th>Ноябрь</th>
-                        <th>Декабрь</th>
-                    </tr>
-                </thead>
-                <tbody id="student-table-body"></tbody>
-            </table>
-            <div class="table-loading" id="table-loading">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Загрузка...</span>
-                </div>
-            </div>
-        </div>
-    </div>
+    <div class="container">
+        <?php foreach (getFlashMessages() as $flash): ?>
+            <div class="notification <?php echo $flash['type']; ?>"><?php echo htmlspecialchars($flash['message']); ?></div>
+        <?php endforeach; ?>
 
-    <!-- Notification container -->
-    <div class="notification-container"></div>
+        <h2>Система документооборота</h2>
 
-    <!-- Modal for reason input/selection -->
-    <div class="modal fade" id="reasonModal" tabindex="-1" aria-labelledby="reasonModalLabel" aria-hidden="true" data-bs-backdrop="false">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="reasonModalLabel">Выбор основания</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="category-number" class="form-label">№ п/п:</label>
-                        <input type="text" id="category-number" class="form-control" placeholder="Введите номер категории">
-                        <div id="category-short" class="form-text"></div>
-                        <div id="category-error" class="error-message"></div>
+        <div class="main-row">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- Template Editor -->
+                <div class="card">
+                    <div class="card-header"><h4><span class="toggle-icon"></span>Редактирование шаблона</h4></div>
+                    <div class="card-body">
+                        <form method="POST" class="ajax-form">
+                            <?php
+                            $fields = [
+                                'UNIVERSITY' => 'ВУЗ',
+                                'SCHOOL_CODE' => 'Школа',
+                                'PROTOCOL_NUMBER' => 'Номер протокола',
+                                'CITY' => 'Город',
+                                'CHAIRPERSON' => 'Председатель',
+                                'CHAIR_DEGREE' => 'Ученая степень председателя',
+                                'SECRETARY' => 'Секретарь',
+                                'SECRETARY_DEGREE' => 'Ученая степень секретаря',
+                                'AGENDA' => 'Повестка дня'
+                            ];
+                            $months = array_keys($monthMap);
+                            foreach ($fields as $placeholder => $label): ?>
+                                <?php if ($placeholder === 'CITY'): ?>
+                                    <div class="mb-2">
+                                        <label class="form-label">Месяц</label>
+                                        <div class="row g-2">
+                                            <div class="col-4">
+                                                <input type="number" id="DAY" name="template[DAY]" class="form-control template-input" data-placeholder="DAY" placeholder="День" min="1" max="31" value="<?php echo htmlspecialchars($templateVars['DAY'] ?? ''); ?>">
+                                            </div>
+                                            <div class="col-4">
+                                                <select id="MONTH" name="template[MONTH]" class="form-select template-input" data-placeholder="MONTH">
+                                                    <option value="">Выберите месяц</option>
+                                                    <?php foreach ($months as $month): ?>
+                                                        <option value="<?php echo $month; ?>" <?php echo ($templateVars['MONTH'] ?? '') == $month ? 'selected' : ''; ?>>
+                                                            <?php echo $month; ?>
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="col-4">
+                                                <input type="number" id="YEAR" name="template[YEAR]" class="form-control template-input" data-placeholder="YEAR" placeholder="Год" min="2000" max="2099" value="<?php echo htmlspecialchars($templateVars['YEAR'] ?? ''); ?>">
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="mb-2">
+                                    <label for="<?php echo $placeholder; ?>" class="form-label"><?php echo $label; ?></label>
+                                    <?php if ($placeholder === 'SCHOOL_CODE'): ?>
+                                        <select id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-select template-input" data-placeholder="<?php echo $placeholder; ?>">
+                                            <?php foreach ($schools as $school): ?>
+                                                <option value="<?php echo $school['code']; ?>" <?php echo ($templateVars['SCHOOL_CODE'] ?? 1) == $school['code'] ? 'selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars($school['name']); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <input type="hidden" id="SCHOOL" name="template[SCHOOL]" class="form-control template-input" data-placeholder="SCHOOL" value="<?php echo htmlspecialchars($templateVars['SCHOOL'] ?? ''); ?>">
+                                    <?php else: ?>
+                                        <input type="text" id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-control template-input" data-placeholder="<?php echo $placeholder; ?>" value="<?php echo htmlspecialchars($templateVars[$placeholder] ?? ''); ?>">
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                            <div class="mb-2">
+                                <label for="MEMBERS" class="form-label">Члены комиссии</label>
+                                <textarea id="MEMBERS" name="template[MEMBERS]" class="form-control template-input" data-placeholder="MEMBERS" rows="4"><?php echo htmlspecialchars($templateVars['MEMBERS'] ?? ''); ?></textarea>
+                            </div>
+                            <input type="hidden" name="action" value="save_template">
+                            <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
+                        </form>
                     </div>
-                    <div class="mb-3">
-                        <label for="customReason" class="form-label">Своё основание:</label>
-                        <textarea id="customReason" class="form-control" rows="4"></textarea>
-                    </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="button" class="btn btn-primary" id="saveReason">Сохранить</button>
+
+                <!-- Protocol Generation -->
+                <div class="card">
+                    <div class="card-header"><h4><span class="toggle-icon"></span>Генерация протокола</h4></div>
+                    <div class="card-body">
+                        <form method="POST" class="ajax-form">
+                            <div class="mb-2">
+                                <label for="format" class="form-label">Формат</label>
+                                <select id="format" name="format" class="form-select">
+                                    <option value="word">Word (.docx)</option>
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label for="filename" class="form-label">Имя файла</label>
+                                <input type="text" id="filename" name="filename" class="form-control" placeholder="protocol_7_2025.pdf">
+                            </div>
+                            <input type="hidden" name="action" value="generate_protocol">
+                            <button type="submit" class="btn btn-primary btn-sm">Сгенерировать</button>
+                        </form>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- Modal for adding academic year -->
-    <div class="modal fade" id="addYearModal" tabindex="-1" aria-labelledby="addYearModalLabel" aria-hidden="true" data-bs-backdrop="false">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="addYearModalLabel">Добавить учебный год</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="academicYearInput" class="form-label">Год (YYYY-YYYY):</label>
-                        <input type="text" class="form-control" id="academicYearInput" placeholder="2024-2025">
-                        <div id="yearError" class="error-message"></div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="button" class="btn btn-primary" id="saveAcademicYear">Сохранить</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal for selecting students -->
-    <div class="modal fade" id="selectStudentsModal" tabindex="-1" aria-labelledby="selectStudentsModalLabel" aria-hidden="true" data-bs-backdrop="false">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="selectStudentsModalLabel">Добавить студентов</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="student-search" class="form-label">Поиск по ФИО:</label>
-                        <div class="fio-search-container">
-                            <input type="text" id="student-search" class="form-control" placeholder="Введите ФИО">
-                            <i class="bi bi-search fio-search-icon"></i>
+            <!-- Main Content -->
+            <div class="content">
+                <!-- Preview -->
+                <div class="card collapsed">
+                    <div class="card-header"><h4><span class="toggle-icon"></span>Предпросмотр протокола</h4></div>
+                    <div class="card-body">
+                        <div class="preview-container">
+                            <div class="preview">
+                                <h1>ПРОТОКОЛ № <span data-placeholder="PROTOCOL_NUMBER"><?php echo htmlspecialchars($templateVars['PROTOCOL_NUMBER'] ?? '{PROTOCOL_NUMBER}'); ?></span></h1>
+                                <h2>Заседания стипендиальной комиссии</h2>
+                                <h2><span data-placeholder="SCHOOL"><?php echo htmlspecialchars($templateVars['SCHOOL'] ?? '{SCHOOL}'); ?></span></h2>
+                                <h2><span data-placeholder="UNIVERSITY"><?php echo htmlspecialchars($templateVars['UNIVERSITY'] ?? '{UNIVERSITY}'); ?></span></h2>
+                                <div class="date-city">
+                                    <span data-placeholder="DATE"><span class="date-day">«<?php echo htmlspecialchars($templateVars['DAY'] ?? 'DAY'); ?>»</span> <?php echo htmlspecialchars($templateVars['MONTH'] ?? 'MONTH'); ?> <?php echo htmlspecialchars($templateVars['YEAR'] ?? 'YEAR'); ?> г.</span>
+                                    <span class="city">г. <span data-placeholder="CITY"><?php echo htmlspecialchars($templateVars['CITY'] ?? '{CITY}'); ?></span></span>
+                                </div>
+                                <p class="section-title">Председатель комиссии:</p>
+                                <p><span data-placeholder="CHAIRPERSON"><?php echo htmlspecialchars($templateVars['CHAIRPERSON'] ?? '{CHAIRPERSON}'); ?></span></p>
+                                <p class="section-title">Члены комиссии:</p>
+                                <p class="members"><span data-placeholder="MEMBERS"><?php echo htmlspecialchars($templateVars['MEMBERS'] ?? '{MEMBERS}'); ?></span></p>
+                                <p class="section-title">Секретарь комиссии:</p>
+                                <p><span data-placeholder="SECRETARY"><?php echo htmlspecialchars($templateVars['SECRETARY'] ?? '{SECRETARY}'); ?></span></p>
+                                <p class="section-title">Повестка дня:</p>
+                                <p><span data-placeholder="AGENDA"><?php echo htmlspecialchars($templateVars['AGENDA'] ?? '{AGENDA}'); ?></span></p>
+                                <p class="section-title">Слушали:</p>
+                                <p><span data-placeholder="LISTENED"><?php echo htmlspecialchars($templateVars['LISTENED'] ?? '{LISTENED}'); ?></span></p>
+                                <p class="section-title">Решили:</p>
+                                <p><span data-placeholder="DECISION"><?php echo htmlspecialchars($templateVars['DECISION'] ?? '{DECISION}'); ?></span></p>
+                                <?php
+                                $rfStudents = array_filter($studentCategories, fn($s) => strtoupper($s['budget'] ?? '-') !== 'ХМАО');
+                                $hmaoStudents = array_filter($studentCategories, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
+                                ?>
+                                <table class="rf-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 0.5cm;">№</th>
+                                            <th style="width: 5cm;">ФИО</th>
+                                            <th style="width: 2cm;">Бюджет</th>
+                                            <th style="width: 2cm;">Группа</th>
+                                            <th style="width: 5cm;">Основание</th>
+                                            <th style="width: 2cm;">Сумма</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($rfStudents)): ?>
+                                            <tr><td class="number">1</td><td>Нет данных</td><td class="budget">-</td><td class="group">-</td><td>Нет студентов</td><td class="amount">0</td></tr>
+                                        <?php else: ?>
+                                            <?php foreach (array_slice($rfStudents, 0, 30) as $index => $student): ?>
+                                                <tr>
+                                                    <td class="number"><?php echo $index + 1; ?></td>
+                                                    <td><?php echo htmlspecialchars($student['full_name']); ?></td>
+                                                    <td class="budget"><?php echo htmlspecialchars($student['budget'] ?: '-'); ?></td>
+                                                    <td class="group"><?php echo htmlspecialchars($student['group_name']); ?></td>
+                                                    <td><?php echo htmlspecialchars(getCategoryName($student['category_id']) ?: 'Не указано'); ?></td>
+                                                    <td class="amount"><?php echo htmlspecialchars($student['amount']); ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                                <table class="hmao-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 0.5cm;">№</th>
+                                            <th style="width: 5cm;">ФИО</th>
+                                            <th style="width: 2cm;">Бюджет</th>
+                                            <th style="width: 2cm;">Группа</th>
+                                            <th style="width: 5cm;">Основание</th>
+                                            <th style="width: 2cm;">Сумма</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($hmaoStudents)): ?>
+                                            <tr><td class="number">1</td><td>Нет данных</td><td class="budget">-</td><td class="group">-</td><td>Нет студентов</td><td class="amount">0</td></tr>
+                                        <?php else: ?>
+                                            <?php foreach (array_slice($hmaoStudents, 0, 3) as $index => $student): ?>
+                                                <tr>
+                                                    <td class="number"><?php echo $index + 1; ?></td>
+                                                    <td><?php echo htmlspecialchars($student['full_name']); ?></td>
+                                                    <td class="budget"><?php echo htmlspecialchars($student['budget'] ?: '-'); ?></td>
+                                                    <td class="group"><?php echo htmlspecialchars($student['group_name']); ?></td>
+                                                    <td><?php echo htmlspecialchars(getCategoryName($student['category_id']) ?: 'Не указано'); ?></td>
+                                                    <td class="amount"><?php echo htmlspecialchars($student['amount']); ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                                <div class="signatures">
+                                    <div class="signature">
+                                        Руководитель инженерной школы цифровых технологий,<br>
+                                        <span data-placeholder="CHAIR_DEGREE"><?php echo htmlspecialchars($templateVars['CHAIR_DEGREE'] ?? '{CHAIR_DEGREE}'); ?></span><br>
+                                        <span class="signature-line"></span>
+                                        <span data-placeholder="SIGN_CHAIR"><?php echo htmlspecialchars($templateVars['SIGN_CHAIR'] ?? '{SIGN_CHAIR}'); ?></span>
+                                    </div>
+                                    <div class="signature">
+                                        Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе,<br>
+                                        <span data-placeholder="SECRETARY_DEGREE"><?php echo htmlspecialchars($templateVars['SECRETARY_DEGREE'] ?? '{SECRETARY_DEGREE}'); ?></span><br>
+                                        <span class="signature-line"></span>
+                                        <span data-placeholder="SIGN_SECRETARY"><?php echo htmlspecialchars($templateVars['SIGN_SECRETARY'] ?? '{SIGN_SECRETARY}'); ?></span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="table-responsive">
-                        <table class="table table-bordered">
-                            <thead>
-                                <tr>
-                                    <th><input type="checkbox" id="select-all-students"></th>
-                                    <th>ФИО</th>
-                                    <th>Группа</th>
-                                    <th>Бюджет</th>
-                                </tr>
-                            </thead>
-                            <tbody id="student-selection-table"></tbody>
-                        </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal for Selecting Students -->
+        <div class="modal no-backdrop fade" id="selectStudentsModal" tabindex="-1" aria-labelledby="selectStudentsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="selectStudentsModalLabel">Выбор студентов</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3 student-search-container">
+                            <input type="text" id="student-search" class="form-control" placeholder="Поиск по ФИО" aria-label="Поиск по ФИО">
+                            <div class="student-search-dropdown" id="student-search-dropdown"></div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table data-table" aria-label="Таблица выбора студентов">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">ФИО</th>
+                                        <th scope="col">Группа</th>
+                                        <th scope="col">Бюджет</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="student-selection-table"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-                </div>
             </div>
         </div>
+
+        <!-- Notification Container -->
+        <div class="notification-container"></div>
+
     </div>
-
-    <!-- Modal for confirming reset -->
-    <div class="modal fade" id="confirmResetModal" tabindex="-1" aria-labelledby="confirmResetModalLabel" aria-hidden="true" data-bs-backdrop="false">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="confirmResetModalLabel">Подтверждение сброса</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    Вы уверены, что хотите сбросить все параметры и удалить всех студентов из категорий? Это действие нельзя отменить.
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="button" class="btn btn-danger" id="confirmReset">Сбросить</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-    <script>
-        // Local data cache
-        let studentCache = null;
-        let lastFilterHash = '';
-        let selectedSchool = '';
-        let selectedYear = '';
-        const schools = <?php echo json_encode($schools); ?>;
-        let modalStudentCache = null;
-
-        // Show notification
-        function showNotification(message, type = 'success') {
-            const container = document.querySelector('.notification-container');
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.innerHTML = `
-                <i class="bi bi-${type === 'success' ? 'check-circle-fill' : 'exclamation-circle-fill'} icon"></i>
-                <span class="message">${message}</span>
-                <button class="close-btn">×</button>
-            `;
-            container.appendChild(notification);
-
-            setTimeout(() => notification.classList.add('show'), 100);
-
-            const timeout = setTimeout(() => {
-                notification.classList.remove('show');
-                notification.classList.add('hide');
-                setTimeout(() => notification.remove(), 300);
-            }, 5000);
-
-            notification.querySelector('.close-btn').addEventListener('click', () => {
-                clearTimeout(timeout);
-                notification.classList.remove('show');
-                notification.classList.add('hide');
-                setTimeout(() => notification.remove(), 300);
-            });
-
-            notification.addEventListener('click', () => {
-                clearTimeout(timeout);
-                notification.classList.remove('show');
-                notification.classList.add('hide');
-                setTimeout(() => notification.remove(), 300);
-            });
-        }
-
-        // Initialize Bootstrap tooltips
-        function initializeTooltips() {
-            const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-            tooltipTriggerList.forEach(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
-        }
-
-        // Close all dropdowns
-        function closeAllDropdowns(exceptMenu) {
-            const menus = [
-                document.getElementById('sort-region-menu')
-            ];
-            menus.forEach(menu => {
-                if (menu !== exceptMenu && menu.classList.contains('show')) {
-                    menu.classList.remove('show');
-                }
-            });
-        }
-
-        // Update filter counts
-        function updateFilterCounts() {
-            const regionCount = document.querySelectorAll('.region-checkbox:checked').length;
-            const regionBadge = document.getElementById('region-filter-count');
-            regionBadge.textContent = regionCount;
-            regionBadge.style.display = regionCount > 0 ? 'inline-block' : 'none';
-            displayCurrentFilters();
-        }
-
-        // Display current filters
-        function displayCurrentFilters() {
-            const schoolFilter = document.getElementById('school-filter').value;
-            const yearFilter = document.getElementById('year-filter').value;
-            const regions = Array.from(document.querySelectorAll('.region-checkbox:checked')).map(cb => cb.value);
-            const fio = document.getElementById('fio-search').value.trim();
-            const currentFiltersDiv = document.getElementById('current-filters');
-
-            let filterText = 'Фильтры: ';
-            let filters = [];
-
-            if (schoolFilter) {
-                const school = schools.find(s => s.code === schoolFilter);
-                filters.push(`Школа: ${school ? school.name + ' (' + school.code + ')' : schoolFilter}`);
-            }
-            if (yearFilter) {
-                filters.push(`Год: ${yearFilter}`);
-            }
-            if (regions.length > 0) {
-                filters.push(`Бюджет: ${regions.join(', ')}`);
-            }
-            if (fio) {
-                filters.push(`ФИО: ${fio}`);
-            }
-
-            filterText += filters.length > 0 ? filters.join(', ') : 'Нет активных фильтров';
-            currentFiltersDiv.textContent = filterText;
-        }
-
-        // Reset filters and categories
-        async function resetFilters(showModal = false) {
-            selectedSchool = '';
-            selectedYear = '';
-            document.getElementById('school-filter').value = '';
-            document.getElementById('year-filter').value = '';
-            document.querySelectorAll('.region-checkbox').forEach(checkbox => {
-                checkbox.checked = false;
-            });
-            document.getElementById('fio-search').value = '';
-            studentCache = null;
-            modalStudentCache = null;
-            lastFilterHash = '';
-            updateFilterCounts();
-
-            try {
-                const response = await fetch('', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'action=reset_student_categories'
-                });
-                const data = await response.json();
-
-                if (data.status !== 'success') {
-                    showNotification(data.message || 'Ошибка сброса категорий студентов', 'error');
-                    return;
-                }
-            } catch (error) {
-                showNotification('Ошибка сети: ' + error.message, 'error');
-                return;
-            }
-
-            const tbody = document.getElementById('student-table-body');
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="16" class="text-center">
-                        Студенты не найдены. 
-                        <a href="#" class="add-students-link">Добавить студентов</a>
-                    </td>
-                </tr>
-            `;
-            document.getElementById('student-count').textContent = 'Студентов: 0';
-
-            if (!showModal) {
-                showNotification('Все параметры и категории студентов сброшены', 'success');
-            }
-
-            debouncedUpdateTable();
-        }
-
-        // Debounce function
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
-
-        // Handle reset confirmation
-        const confirmResetModal = new bootstrap.Modal(document.getElementById('confirmResetModal'));
-        document.getElementById('confirmReset').addEventListener('click', async () => {
-            await resetFilters(true);
-            confirmResetModal.hide();
-            setTimeout(() => {
-                document.getElementById('reset-filters').focus();
-            }, 100);
-        });
-
-        // Handle reset button
-        document.getElementById('reset-filters').addEventListener('click', (e) => {
-            e.preventDefault();
-            confirmResetModal.show();
-        });
-
-        // School and year select handlers
-        document.getElementById('school-filter').addEventListener('change', function() {
-            selectedSchool = this.value;
-            studentCache = null;
-            debouncedUpdateTable();
-        });
-
-        document.getElementById('year-filter').addEventListener('change', function() {
-            selectedYear = this.value;
-            studentCache = null;
-            debouncedUpdateTable();
-        });
-
-        // Budget filter handlers
-        const sortToggle = document.getElementById('sort-region-toggle');
-        const sortMenu = document.getElementById('sort-region-menu');
-        let sortToggleDebounce = false;
-
-        sortToggle.addEventListener('click', function(event) {
-            if (sortToggleDebounce) return;
-            sortToggleDebounce = true;
-            setTimeout(() => { sortToggleDebounce = false; }, 200);
-            event.stopPropagation();
-            closeAllDropdowns(sortMenu);
-            sortMenu.classList.toggle('show');
-        });
-
-        document.addEventListener('click', function(event) {
-            if (!sortToggle.contains(event.target) && !sortMenu.contains(event.target)) {
-                sortMenu.classList.remove('show');
-            }
-        });
-
-        // Reason modal
-        const reasonModal = new bootstrap.Modal(document.getElementById('reasonModal'));
-        let currentCheckbox = null;
-
-        // Handle category number input
-        document.getElementById('category-number').addEventListener('input', async function() {
-            const number = this.value.trim();
-            const categoryShort = document.getElementById('category-short');
-            const categoryError = document.getElementById('category-error');
-
-            categoryShort.textContent = '';
-            categoryError.textContent = '';
-            categoryError.style.display = 'none';
-            this.classList.remove('is-invalid');
-            delete this.dataset.categoryId;
-
-            if (number) {
-                try {
-                    const response = await fetch('', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: `action=get_category_by_number&number=${encodeURIComponent(number)}`
-                    });
-                    const result = await response.json();
-
-                    if (result.status === 'success') {
-                        categoryShort.textContent = `Категория: ${result.data.category_short} (${result.data.category_name})`;
-                        this.dataset.categoryId = result.data.id;
-                    } else {
-                        categoryShort.textContent = 'Категория не найдена';
-                        this.classList.add('is-invalid');
-                        categoryError.textContent = 'Категория с таким номером не существует';
-                        categoryError.style.display = 'block';
-                    }
-                } catch (error) {
-                    this.classList.add('is-invalid');
-                    categoryError.textContent = 'Ошибка сети. Пожалуйста, попробуйте снова.';
-                    categoryError.style.display = 'block';
-                    showNotification('Ошибка сети: ' + error.message, 'error');
-                }
-            }
-        });
-
-        document.getElementById('reasonModal').addEventListener('hidden.bs.modal', function() {
-            document.getElementById('category-number').value = '';
-            document.getElementById('customReason').value = '';
-            document.getElementById('category-number').classList.remove('is-invalid');
-            document.getElementById('customReason').classList.remove('is-invalid');
-            document.getElementById('category-short').textContent = '';
-            document.getElementById('category-error').textContent = '';
-            document.getElementById('category-error').style.display = 'none';
-            currentCheckbox = null;
-            setTimeout(() => {
-                document.querySelector('.data-table').focus();
-            }, 100);
-        });
-
-        document.getElementById('saveReason').addEventListener('click', async function() {
-            const categoryNumberInput = document.getElementById('category-number');
-            const categoryId = categoryNumberInput.dataset.categoryId || null;
-            const customReason = document.getElementById('customReason').value.trim();
-            const categoryError = document.getElementById('category-error');
-
-            // Validate input
-            if (!categoryId && !customReason) {
-                categoryNumberInput.classList.add('is-invalid');
-                categoryError.textContent = 'Укажите номер категории или введите своё основание';
-                categoryError.style.display = 'block';
-                showNotification('Укажите номер категории или введите своё основание', 'error');
-                return;
-            }
-
-            if (customReason.length > 255) {
-                document.getElementById('customReason').classList.add('is-invalid');
-                categoryError.textContent = 'Своё основание не должно превышать 255 символов';
-                categoryError.style.display = 'block';
-                showNotification('Своё основание слишком длинное', 'error');
-                return;
-            }
-
-            if (currentCheckbox) {
-                const student_id = currentCheckbox.dataset.student;
-                const month = currentCheckbox.dataset.month;
-                const academicYear = selectedYear || <?php echo json_encode(getMostRecentAcademicYear()); ?>;
-                const action = currentCheckbox.dataset.reason ? 'update_reason' : 'save_reason';
-
-                if (!academicYear) {
-                    showNotification('Учебный год не выбран и не найден в базе данных', 'error');
-                    return;
-                }
-
-                try {
-                    // Save reason
-                    const reasonResponse = await fetch('', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: `action=${action}&student_id=${student_id}&month=${month}&category_id=${categoryId || ''}&custom_reason=${encodeURIComponent(customReason)}`
-                    });
-                    const reasonData = await reasonResponse.json();
-
-                    if (reasonData.status !== 'success') {
-                        categoryNumberInput.classList.add('is-invalid');
-                        categoryError.textContent = reasonData.message || 'Ошибка сохранения основания';
-                        categoryError.style.display = 'block';
-                        showNotification(reasonData.message || 'Ошибка сохранения основания', 'error');
-                        return;
-                    }
-
-                    // Add student to category if category_id is provided
-                    if (categoryId) {
-                        const categoryResponse = await fetch('', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: `action=add_students_to_categories&student_ids=${encodeURIComponent(JSON.stringify([student_id]))}&category_id=${categoryId}&academic_year=${encodeURIComponent(academicYear)}`
-                        });
-                        const categoryData = await categoryResponse.json();
-
-                        if (categoryData.status !== 'success') {
-                            showNotification(categoryData.message || 'Ошибка добавления студента в категорию', 'error');
-                            return;
-                        }
-                    }
-
-                    // Update checkbox
-                    const reason = customReason || (categoryId ? <?php echo json_encode(array_column($categories, 'category_name', 'id')); ?>[categoryId] : '');
-                    currentCheckbox.setAttribute('data-reason', reason);
-                    currentCheckbox.setAttribute('data-bs-toggle', 'tooltip');
-                    currentCheckbox.setAttribute('data-bs-title', reason);
-                    currentCheckbox.disabled = true; // Disable checkbox
-                    new bootstrap.Tooltip(currentCheckbox);
-                    reasonModal.hide();
-                    showNotification(action === 'save_reason' ? 'Основание сохранено' : 'Основание обновлено', 'success');
-                    studentCache = null;
-                    modalStudentCache = null;
-                    debouncedUpdateTable();
-                } catch (error) {
-                    categoryNumberInput.classList.add('is-invalid');
-                    categoryError.textContent = 'Ошибка сети. Пожалуйста, попробуйте снова.';
-                    categoryError.style.display = 'block';
-                    showNotification('Ошибка сети: ' + error.message, 'error');
-                }
-            }
-        });
-
-        // Academic year modal
-        const addYearModal = new bootstrap.Modal(document.getElementById('addYearModal'));
-
-        document.getElementById('addYearModal').addEventListener('hidden.bs.modal', function() {
-            document.getElementById('academicYearInput').value = '';
-            document.getElementById('yearError').textContent = '';
-            document.getElementById('yearError').style.display = 'none';
-            document.getElementById('academicYearInput').classList.remove('is-invalid');
-            setTimeout(() => {
-                document.getElementById('year-filter').focus();
-            }, 100);
-        });
-
-        document.getElementById('saveAcademicYear').addEventListener('click', async function() {
-            const yearInput = document.getElementById('academicYearInput');
-            const yearError = document.getElementById('yearError');
-            const yearValue = yearInput.value.trim();
-
-            if (!yearValue.match(/^\d{4}-\d{4}$/)) {
-                yearInput.classList.add('is-invalid');
-                yearError.textContent = 'Формат: YYYY-YYYY (например, 2024-2025)';
-                yearError.style.display = 'block';
-                showNotification('Некорректный формат учебного года', 'error');
-                return;
-            }
-
-            const [startYear, endYear] = yearValue.split('-').map(Number);
-            if (endYear - startYear !== 1) {
-                yearInput.classList.add('is-invalid');
-                yearError.textContent = 'Учебный год должен охватывать ровно один год';
-                yearError.style.display = 'block';
-                showNotification('Некорректный учебный год', 'error');
-                return;
-            }
-
-            yearInput.classList.remove('is-invalid');
-            yearError.style.display = 'none';
-
-            try {
-                const response = await fetch('', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `action=add_academic_year&year=${encodeURIComponent(yearValue)}`
-                });
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    const yearSelect = document.getElementById('year-filter');
-                    const newOption = document.createElement('option');
-                    newOption.value = data.year;
-                    newOption.textContent = data.year;
-                    yearSelect.insertBefore(newOption, yearSelect.children[1]);
-                    yearSelect.value = data.year;
-                    selectedYear = data.year;
-                    refreshYearFilters(data.year);
-                    addYearModal.hide();
-                    showNotification(`Учебный год ${data.year} добавлен`, 'success');
-                    studentCache = null;
-                    debouncedUpdateTable();
-                } else {
-                    yearInput.classList.add('is-invalid');
-                    yearError.textContent = data.message || 'Ошибка добавления года';
-                    yearError.style.display = 'block';
-                    showNotification(data.message || 'Ошибка добавления учебного года', 'error');
-                }
-            } catch (error) {
-                yearInput.classList.add('is-invalid');
-                yearError.textContent = 'Ошибка сети. Пожалуйста, попробуйте снова.';
-                yearError.style.display = 'block';
-                showNotification('Ошибка сети: ' + error.message, 'error');
-            }
-        });
-
-        // Student selection modal
-        const selectStudentsModal = new bootstrap.Modal(document.getElementById('selectStudentsModal'));
-
-        document.getElementById('selectStudentsModal').addEventListener('hidden.bs.modal', function() {
-            setTimeout(() => {
-                document.querySelector('.btn[data-bs-target="#selectStudentsModal"]').focus();
-            }, 100);
-        });
-
-        async function loadStudentsToModal(fio = '') {
-            const tableBody = document.getElementById('student-selection-table');
-            if (modalStudentCache && modalStudentCache.fio === fio && tableBody.children.length > 0) {
-                return;
-            }
-
-            tableBody.innerHTML = '<tr><td colspan="4" class="text-center">Загрузка...</td></tr>';
-
-            try {
-                const response = await fetch('', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `action=get_all_students&fio=${encodeURIComponent(fio)}`
-                });
-                const result = await response.json();
-
-                tableBody.innerHTML = '';
-                if (result.status === 'success' && result.data.length > 0) {
-                    modalStudentCache = { fio, data: result.data };
-                    result.data.forEach(student => {
-                        const row = document.createElement('tr');
-                        row.innerHTML = `
-                            <td><input type="checkbox" class="student-checkbox" value="${student.id}"></td>
-                            <td>${student.full_name}</td>
-                            <td>${student.group_name}</td>
-                            <td>${student.budget || '-'}</td>
-                        `;
-                        tableBody.appendChild(row);
-                    });
-
-                    // Attach event listeners to checkboxes
-                    document.querySelectorAll('.student-checkbox').forEach(checkbox => {
-                        checkbox.addEventListener('change', async function() {
-                            const studentId = this.value;
-                            try {
-                                if (this.checked) {
-                                    // Add student to default category
-                                    const response = await fetch('', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                        body: `action=add_student_to_default_category&student_id=${studentId}`
-                                    });
-                                    const result = await response.json();
-
-                                    if (result.status === 'success') {
-                                        showNotification('Студент добавлен', 'success');
-                                        studentCache = null;
-                                        modalStudentCache = null;
-                                        debouncedUpdateTable();
-                                    } else {
-                                        showNotification(result.message || 'Ошибка добавления студента', 'error');
-                                        this.checked = false;
-                                    }
-                                }
-                            } catch (error) {
-                                showNotification('Ошибка сети: ' + error.message, 'error');
-                                this.checked = !this.checked; // Revert checkbox state
-                            }
-                        });
-                    });
-                } else {
-                    modalStudentCache = null;
-                    tableBody.innerHTML = '<tr><td colspan="4" class="text-center">Студенты не найдены</td></tr>';
-                }
-            } catch (error) {
-                modalStudentCache = null;
-                tableBody.innerHTML = '<tr><td colspan="4" class="text-center">Ошибка загрузки</td></tr>';
-                showNotification('Ошибка загрузки студентов: ' + error.message, 'error');
-            }
-        }
-
-        const debouncedLoadStudents = debounce(loadStudentsToModal, 300);
-
-        document.getElementById('student-search').addEventListener('input', function() {
-            debouncedLoadStudents(this.value.trim());
-        });
-
-        document.getElementById('select-all-students').addEventListener('change', function() {
-            document.querySelectorAll('.student-checkbox').forEach(checkbox => {
-                checkbox.checked = this.checked;
-                checkbox.dispatchEvent(new Event('change'));
-            });
-        });
-
-        document.getElementById('selectStudentsModal').addEventListener('shown.bs.modal', function() {
-            const studentSearch = document.getElementById('student-search').value.trim();
-            if (!modalStudentCache || modalStudentCache.fio !== studentSearch) {
-                loadStudentsToModal(studentSearch);
-            }
-            setTimeout(() => {
-                document.getElementById('student-search').focus();
-            }, 100);
-        });
-
-        // Update table
-        async function updateTable() {
-            const tableLoading = document.getElementById('table-loading');
-            tableLoading.classList.add('show');
-
-            const school = selectedSchool;
-            const year = selectedYear;
-            const regions = Array.from(document.querySelectorAll('.region-checkbox:checked')).map(cb => cb.value);
-            const fio = document.getElementById('fio-search').value.trim();
-
-            const filterHash = JSON.stringify({ year, school, regions, fio });
-            if (studentCache && lastFilterHash === filterHash) {
-                renderTable(studentCache);
-                tableLoading.classList.remove('show');
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('action', 'get_students');
-            formData.append('schools', JSON.stringify(school ? [school] : []));
-            formData.append('years', JSON.stringify(year ? [year] : []));
-            formData.append('regions', JSON.stringify(regions));
-            formData.append('fio', fio);
-
-            try {
-                const response = await fetch('', {
-                    method: 'POST',
-                    body: new URLSearchParams(formData)
-                });
-                const result = await response.json();
-                studentCache = result;
-                lastFilterHash = filterHash;
-                renderTable(result);
-            } catch (error) {
-                showNotification('Ошибка загрузки данных: ' + error.message, 'error');
-                document.getElementById('student-count').textContent = 'Студентов: 0';
-                renderTable({ status: 'error', data: [], total: 0 });
-            } finally {
-                tableLoading.classList.remove('show');
-            }
-        }
-
-        const debouncedUpdateTable = debounce(updateTable, 300);
-
-        function renderTable(result) {
-            const tbody = document.getElementById('student-table-body');
-            tbody.innerHTML = '';
-
-            if (result.status !== 'success' || result.data.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="16" class="text-center">
-                            Студенты не найдены. 
-                            <a href="#" class="add-students-link">Добавить студентов</a>
-                        </td>
-                    </tr>
-                `;
-                document.getElementById('student-count').textContent = 'Студентов: 0';
-            } else {
-                const students = result.data;
-                students.forEach((student, index) => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${index + 1}</td>
-                        <td data-bs-toggle="tooltip" data-bs-title="${student.direction_name || 'Нет направления'}" data-bs-placement="top">
-                            ${student.full_name}
-                        </td>
-                        <td>${student.group_name}</td>
-                        <td>${student.budget || '-'}</td>
-                        ${Array.from({length: 12}, (_, i) => {
-                            const month = i + 1;
-                            const reason = student.reasons[month] || '';
-                            return `
-                                <td>
-                                    <input type="checkbox" class="month-checkbox" 
-                                           data-student="${student.id}" 
-                                           data-month="${month}" 
-                                           ${reason ? `checked data-reason="${reason.replace(/"/g, '"')}" data-bs-toggle="tooltip" data-bs-title="${reason.replace(/"/g, '"')}" disabled` : ''}
-                                           data-bs-placement="top" data-bs-delay='{"show":100,"hide":100}'>
-                                </td>
-                            `;
-                        }).join('')}
-                    `;
-                    tbody.appendChild(row);
-                });
-                document.getElementById('student-count').textContent = `Студентов: ${result.total}`;
-            }
-
-            initializeTooltips();
-            displayCurrentFilters();
-
-            document.querySelectorAll('.month-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', async function(event) {
-                    event.stopPropagation();
-                    const student_id = this.dataset.student;
-                    const month = this.dataset.month;
-                    const isChecked = this.checked;
-                    const existingReason = this.dataset.reason || '';
-
-                    if (isChecked) {
-                        currentCheckbox = this;
-                        if (existingReason) {
-                            const categoryNumberInput = document.getElementById('category-number');
-                            const customReasonInput = document.getElementById('customReason');
-                            const categories = <?php echo json_encode($categories); ?>;
-                            const category = categories.find(c => c.category_name === existingReason);
-
-                            if (category) {
-                                categoryNumberInput.value = category.number;
-                                categoryNumberInput.dataset.categoryId = category.id;
-                                document.getElementById('category-short').textContent = `Категория: ${category.category_short} (${category.category_name})`;
-                            } else {
-                                customReasonInput.value = existingReason;
-                            }
-                        }
-                        reasonModal.show();
-                    } else {
-                        try {
-                            const response = await fetch('', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                                body: `action=remove_reason&student_id=${student_id}&month=${month}`
-                            });
-                            const data = await response.json();
-
-                            if (data.status === 'success') {
-                                this.removeAttribute('data-reason');
-                                this.removeAttribute('data-bs-toggle');
-                                this.removeAttribute('data-bs-title');
-                                this.disabled = false; // Re-enable checkbox
-                                bootstrap.Tooltip.getInstance(this)?.dispose();
-                                showNotification('Основание удалено', 'success');
-                                studentCache = null;
-                                modalStudentCache = null;
-                                debouncedUpdateTable();
-                            } else {
-                                showNotification(data.message || 'Ошибка удаления основания', 'error');
-                                this.checked = true;
-                            }
-                        } catch (error) {
-                            showNotification('Ошибка сети: ' + error.message, 'error');
-                            this.checked = true;
-                        }
-                    }
-                });
-            });
-
-            // Reattach event listener for add students link
-            document.querySelectorAll('.add-students-link').forEach(link => {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    selectStudentsModal.show();
-                });
-            });
-        }
-
-        document.querySelectorAll('.region-checkbox').forEach(checkbox => {
-            checkbox.addEventListener('change', () => {
-                updateFilterCounts();
-                studentCache = null;
-                debouncedUpdateTable();
-            });
-        });
-
-        document.getElementById('fio-search').addEventListener('input', function() {
-            studentCache = null;
-            debouncedUpdateTable();
-        });
-
-        document.getElementById('fio-search').addEventListener('keydown', function(event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                studentCache = null;
-                debouncedUpdateTable();
-            }
-        });
-
-        document.addEventListener('DOMContentLoaded', function() {
-            updateFilterCounts();
-            debouncedUpdateTable();
-        });
-
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter' && event.target.tagName === 'INPUT' && event.target.type === 'text') {
-                event.preventDefault();
-            }
-        });
-
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('keydown', function(event) {
-                if (event.key === 'Escape') {
-                    bootstrap.Modal.getInstance(modal).hide();
-                }
-            });
-        });
-
-        function refreshYearFilters(newYear) {
-            const yearSelect = document.getElementById('academic-year-select');
-            const newOption = document.createElement('option');
-            newOption.value = newYear;
-            newOption.textContent = newYear;
-            yearSelect.insertBefore(newOption, yearSelect.children[1]);
-        }
-
-        function clearValidationErrors(modalId) {
-            const modal = document.getElementById(modalId);
-            modal.querySelectorAll('.is-invalid').forEach(element => {
-                element.classList.remove('is-invalid');
-            });
-            modal.querySelectorAll('.error-message').forEach(element => {
-                element.textContent = '';
-                element.style.display = 'none';
-            });
-        }
-
-        document.querySelectorAll('.modal .btn-secondary').forEach(button => {
-            button.addEventListener('click', function() {
-                const modal = this.closest('.modal');
-                bootstrap.Modal.getInstance(modal).hide();
-            });
-        });
-
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('show.bs.modal', function() {
-                clearValidationErrors(this.id);
-            });
-        });
-
-        window.addEventListener('resize', function() {
-            const dropdownMenus = document.querySelectorAll('.dropdown-menu.show');
-            dropdownMenus.forEach(menu => {
-                const rect = menu.getBoundingClientRect();
-                if (rect.bottom > window.innerHeight) {
-                    menu.style.maxHeight = `${window.innerHeight - rect.top - 20}px`;
-                }
-            });
-        });
-
-        document.querySelector('.table-responsive').addEventListener('scroll', function() {
-            const headers = document.querySelectorAll('.data-table th');
-            headers.forEach(header => {
-                header.style.transform = `translateX(-${this.scrollLeft}px)`;
-            });
-        });
-
-        updateFilterCounts();
-        debouncedUpdateTable();
-    </script>
 </body>
 </html>
