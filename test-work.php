@@ -29,7 +29,7 @@ function getFlashMessages() {
     return $flash;
 }
 
-function validateFilename($filename, $extension = 'docx') {
+function validateFilename($filename, $extension = 'pdf') {
     if (empty($filename) || !preg_match('/^[a-zA-Z0-9_\-\s]+\.' . $extension . '$/', $filename) ||
         strpos($filename, '..') !== false || strpos($filename, '/') !== false || strpos($filename, '\\') !== false) {
         return false;
@@ -56,6 +56,7 @@ function getTemplateVariables($pdo, $school_code = 1, $academic_year = '2024/202
         $stmt->execute([$school_code, $academic_year]);
         $vars = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
         
+        // Define required placeholders
         $requiredPlaceholders = [
             'UNIVERSITY', 'SCHOOL', 'SCHOOL_CODE', 'PROTOCOL_NUMBER', 'DATE', 'DAY', 
             'MONTH', 'YEAR', 'CITY', 'CHAIRPERSON', 'CHAIR_DEGREE', 'MEMBERS', 
@@ -69,12 +70,13 @@ function getTemplateVariables($pdo, $school_code = 1, $academic_year = '2024/202
             'ноября' => 11, 'декабря' => 12
         ];
 
+        // Set default values for date-related placeholders
         $currentDate = new DateTime();
         $defaultDay = $currentDate->format('j');
         $defaultMonthNum = $currentDate->format('n');
         $defaultMonth = array_search($defaultMonthNum, $monthMap) ?: 'января';
         $defaultYear = $currentDate->format('Y');
-        $defaultCity = $vars['CITY'] ?? 'Ханты-Мансийск';
+        $defaultCity = $vars['CITY'] ?? 'Ханты-Мансийск'; // Default city if not set
 
         foreach ($requiredPlaceholders as $placeholder) {
             if (!isset($vars[$placeholder])) {
@@ -92,6 +94,7 @@ function getTemplateVariables($pdo, $school_code = 1, $academic_year = '2024/202
             }
         }
 
+        // Ensure DATE is consistent with DAY, MONTH, YEAR
         if (isset($vars['DAY'], $vars['MONTH'], $vars['YEAR'], $vars['CITY'])) {
             $vars['DATE'] = "«{$vars['DAY']}» {$vars['MONTH']} {$vars['YEAR']} г. г. {$vars['CITY']}";
         }
@@ -117,7 +120,7 @@ function getCategories($pdo) {
     static $cache = null;
     if ($cache === null) {
         try {
-            $stmt = $pdo->query("SELECT id, number, category_name, category_short, payment_frequency, max_amount FROM Categories ORDER BY number");
+            $stmt = $pdo->query("SELECT id, number, category_name, category_short, payment_frequency, max_amount FROM categories ORDER BY number");
             $cache = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (PDOException $e) {
             error_log("Ошибка в getCategories: " . $e->getMessage());
@@ -159,7 +162,7 @@ function getStudentCategories($pdo, $filters = []) {
         JOIN Directions d ON g.direction_id = d.code
         JOIN Schools sc ON d.vsh_code = sc.code
         LEFT JOIN StudentReasons sr ON s.id = sr.student_id
-        LEFT JOIN Categories c ON sr.category_id = c.id
+        LEFT JOIN categories c ON sr.category_id = c.id
         WHERE 1=1
     ";
 
@@ -271,6 +274,7 @@ $actions = [
                 }
             }
 
+            // Synchronize DATE with DAY, MONTH, YEAR, CITY
             if (isset($_POST['template']['DAY'], $_POST['template']['MONTH'], $_POST['template']['YEAR'], $_POST['template']['CITY'])) {
                 $day = trim($_POST['template']['DAY']);
                 $month = trim($_POST['template']['MONTH']);
@@ -307,7 +311,7 @@ $actions = [
     },
     'generate_protocol' => function() use ($pdo, $defaultAcademicYear, $monthMap) {
         $filename = trim($_POST['filename'] ?? '');
-        $format = $_POST['format'] ?? 'word';
+        $format = $_POST['format'] ?? 'pdf';
         $month = trim($_POST['month'] ?? '');
         $year = trim($_POST['year'] ?? $defaultAcademicYear);
 
@@ -318,7 +322,7 @@ $actions = [
             echo json_encode(['status' => 'error', 'message' => 'Неверное имя файла']);
             exit;
         }
-        $filename = $filename ?: "3_Протокол_на_матпомощь_ноябрь_2024_г_.{$extension}";
+        $filename = $filename ?: "protocol_7_{$fileYear}.{$extension}";
 
         $filters = [
             'month' => $month,
@@ -344,6 +348,7 @@ $actions = [
             $section->addText($templateVars['SCHOOL'], ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 120]);
             $section->addText($templateVars['UNIVERSITY'], ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 240]);
 
+            // Use DATE directly from templateVars
             $section->addText($templateVars['DATE'], ['size' => 12], ['alignment' => 'both', 'spaceAfter' => 240]);
             $section->addTextBreak(1, ['size' => 12], ['spaceAfter' => 240]);
 
@@ -352,8 +357,7 @@ $actions = [
                 ['Члены комиссии:', $templateVars['MEMBERS'], true],
                 ['Секретарь комиссии:', $templateVars['SECRETARY']],
                 ['Повестка дня:', $templateVars['AGENDA']],
-                ['Слушали:', $templateVars['LISTENED']],
-                ['Решили:', 'Оказать материальную поддержку следующим нуждающимся студентам:']
+                ['Слушали:', $templateVars['LISTENED']]
             ] as $item) {
                 $section->addText($item[0], ['bold' => true, 'size' => 12], ['spaceAfter' => 60]);
                 $text = $item[1];
@@ -372,7 +376,7 @@ $actions = [
             $rfStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') !== 'ХМАО');
             $hmaoStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
 
-            foreach ([['РФ', $rfStudents, 20], ['ХМАО', $hmaoStudents, 5]] as $group) {
+            foreach ([['РФ', $rfStudents, 30], ['ХМАО', $hmaoStudents, 3]] as $group) {
                 $table = $section->addTable([
                     'borderSize' => 6,
                     'width' => 100 * 50,
@@ -400,7 +404,7 @@ $actions = [
                     $table->addCell($widths[4], ['valign' => 'center'])->addText('Нет студентов', ['size' => 12]);
                     $table->addCell($widths[5], ['valign' => 'center'])->addText('0', ['size' => 12], ['alignment' => 'center']);
                 } else {
-                    foreach ($group[1] as $index => $student) {
+                    foreach (array_slice($group[1], 0, $group[2]) as $index => $student) {
                         $reason = $student['category_short'] ?: 'Не указано';
                         $table->addRow();
                         $table->addCell($widths[0], ['valign' => 'center'])->addText($index + 1, ['size' => 12], ['alignment' => 'center']);
@@ -457,7 +461,7 @@ $actions = [
             $hmaoStudents = array_filter($students, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
 
             $studentListRf = '';
-            foreach ($rfStudents as $index => $student) {
+            foreach (array_slice($rfStudents, 0, 30) as $index => $student) {
                 $reason = $student['category_short'] ?: 'Не указано';
                 $row = [
                     'number' => $index + 1,
@@ -474,7 +478,7 @@ $actions = [
             }
 
             $studentListHmao = '';
-            foreach ($hmaoStudents as $index => $student) {
+            foreach (array_slice($hmaoStudents, 0, 3) as $index => $student) {
                 $reason = $student['category_short'] ?: 'Не указано';
                 $row = [
                     'number' => $index + 1,
@@ -603,306 +607,263 @@ $studentCategories = getStudentCategories($pdo, $filters);
     <title>Система документооборота - ЮГУ</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --ygu-black: #000000;
-            --ygu-light-black: #000000;
-            --ygu-gray: #eceff1;
-            --ygu-dark-gray: #37474f;
-            --ygu-blue: rgb(76, 84, 175);
-            --ygu-light-blue: rgb(76, 84, 175);
+            --primary-color: #2c3e50;
+            --secondary-color: #34495e;
+            --accent-color: #3498db;
+            --light-color: #ecf0f1;
+            --dark-color: #2c3e50;
+            --success-color: #27ae60;
+            --danger-color: #e74c3c;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
         }
 
         body {
             font-family: 'Roboto', sans-serif;
-            background: linear-gradient(to bottom, var(--ygu-gray), #ffffff);
-            color: var(--ygu-dark-gray);
+            background-color: #f5f7fa;
+            color: var(--dark-color);
+            line-height: 1.6;
         }
 
-        .container {
+        .app-container {
             max-width: 1600px;
+            margin: 0 auto;
             padding: 20px;
-            margin-top: 20px;
-            margin-left: 10px;
         }
 
-        .main-row {
+        .app-header {
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .app-header h1 {
+            color: var(--primary-color);
+            font-weight: 600;
+            margin: 0;
             display: flex;
-            gap: 20px;
-        }
-
-        .sidebar {
-            flex: 0 0 300px;
-        }
-
-        .content {
-            flex: 1;
-        }
-
-        .card {
-            border: none;
-            border-radius: 10px;
-            background: #ffffff;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            margin-bottom: 15px;
-            transition: transform 0.2s;
-        }
-
-        .card:hover {
-            transform: translateY(-2px);
-        }
-
-        .card-header {
-            background: var(--ygu-blue);
-            color: #ffffff;
-            padding: 10px 15px;
-            border-radius: 10px 10px 0 0;
-            font-weight: 500;
-            display: flex;
-            justify-content: space-between;
             align-items: center;
-            cursor: pointer;
-        }
-
-        .card-header h4 {
-            margin: 0;
-            font-size: 1rem;
-            font-weight: 500;
-        }
-
-        .card-body {
-            padding: 15px;
-            border-radius: 0 0 10px 10px;
-        }
-
-        .card.collapsed .card-body {
-            display: none;
-        }
-
-        .toggle-icon::before {
-            content: '▼';
-            font-size: 0.9rem;
-        }
-
-        .card.collapsed .toggle-icon::before {
-            content: '▶';
-        }
-
-        .notification {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 10px 20px;
-            border-radius: 6px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            background: #ffffff;
-            z-index: 1000;
-            font-size: 0.9rem;
-        }
-
-        .notification.success {
-            border-left: 4px solid var(--ygu-light-blue);
-        }
-
-        .notification.error {
-            border-left: 4px solid #d32f2f;
-        }
-
-        .form-select, .form-control {
-            border-radius: 6px;
-            padding: 8px;
-            font-size: 0.85rem;
-            border: 1px solid #b0bec5;
-        }
-
-        .form-select:focus, .form-control:focus {
-            border-color: var(--ygu-light-black);
-            box-shadow: 0 0 0 0.2rem rgba(0, 0, 0, 0);
-        }
-
-        .btn-primary {
-            background: var(--ygu-black);
-            border-color: var(--ygu-black);
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 0.85rem;
-            transition: background 0.2s;
-        }
-
-        .btn-primary:hover {
-            background: var(--ygu-light-black);
-            border-color: var(--ygu-light-black);
-        }
-
-        .btn-outline-secondary {
-            border-color: var(--ygu-dark-gray);
-            color: var(--ygu-dark-gray);
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 0.85rem;
-        }
-
-        .btn-outline-secondary:hover {
-            background: var(--ygu-gray);
-            border-color: var(--ygu-dark-gray);
-        }
-
-        .btn-sm {
-            padding: 4px 8px;
-            font-size: 0.8rem;
-        }
-
-        #set-current-date {
-            font-size: 0.8rem;
-            padding: 8px;
-        }
-
-        .preview-container {
-            background: #ffffff;
-            border: 1px solid #000000;
-            width: 210mm;
-            min-height: 297mm;
-            margin: 15px auto;
-            padding: 20mm 15mm;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-            font-family: 'Times New Roman', serif;
-            font-size: 12pt;
-            line-height: 1;
-            text-align: justify;
-        }
-
-        .preview h1, .preview h2 {
-            font-size: 14pt;
-            font-weight: bold;
-            text-align: center;
-            margin: 0;
-            padding: 0.5em 0;
-            color: #000000;
-            line-height: 1;
-        }
-
-        .preview p {
-            margin: 0;
-            padding: 0.5em 0;
-            line-height: 1;
-            text-align: justify;
-        }
-
-        .preview .section-title {
-            font-weight: bold;
-            padding-top: 1em;
-            padding-bottom: 0.2em;
-            color: #000000;
-            line-height: 1;
-        }
-
-        .preview .members {
-            white-space: pre-wrap;
-            padding-bottom: 0.5em;
-            line-height: 1;
-        }
-
-        .preview .date-city {
-            padding: 1em 0;
-            font-size: 12pt;
-            line-height: 1;
-            text-align: justify;
-        }
-
-        .preview table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1em 0;
-            border: 1px solid #000000;
-            font-size: 11pt;
-            line-height: 1;
-        }
-
-        .preview th, .preview td {
-            border: 1px solid #000000;
-            padding: 8px;
-            vertical-align: middle;
-            line-height: 1;
-        }
-
-        .preview th {
-            background: #ECEFF1;
-            font-weight: bold;
-            text-align: center;
-        }
-
-        .preview td.number, .preview td.amount, .preview td.budget, .preview td.group {
-            text-align: center;
-        }
-
-        .preview .signatures {
-            padding-top: 2em;
-            line-height: 1;
-        }
-
-        .preview .signature {
-            padding-bottom: 1.5em;
-            display: flex;
-            align-items: baseline;
             gap: 10px;
-            line-height: 1;
         }
 
-        .preview .signature-line {
-            display: inline-block;
-            width: 40mm;
-            border-bottom: 1px solid #000000;
-            vertical-align: middle;
-            margin: 0 5px;
+        .app-header h1 i {
+            font-size: 1.8rem;
+            color: var(--accent-color);
         }
 
-        .sidebar .card {
-            margin-bottom: 12px;
-        }
-
-        .sidebar .card-header {
-            padding: 8px 12px;
-        }
-
-        .sidebar .card-body {
-            padding: 12px;
-        }
-
-        .sidebar .form-label {
-            font-size: 0.85rem;
-            color: var(--ygu-dark-gray);
-        }
-
-        .sidebar .form-control, .sidebar .form-select {
-            font-size: 0.8rem;
-        }
-
-        h2 {
-            color: var(--ygu-blue);
-            font-size: 1.5rem;
-            margin-bottom: 20px;
-            font-weight: 500;
+        .app-layout {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 25px;
         }
 
         @media (max-width: 1200px) {
-            .main-row {
-                flex-direction: column;
-            }
-            .sidebar {
-                flex: 0 0 100%;
-            }
-            .preview-container {
-                width: 100%;
-                padding: 15mm;
+            .app-layout {
+                grid-template-columns: 1fr;
             }
         }
 
-        @media (max-width: 768px) {
-            .container {
-                padding: 10px;
-                margin-left: 0;
-            }
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            border: none;
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .card-header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            border-bottom: none;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
+        .card-header .toggle-icon {
+            transition: var(--transition);
+        }
+
+        .card.collapsed .card-header .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--secondary-color);
+        }
+
+        .form-control, .form-select {
+            border-radius: var(--border-radius);
+            border: 1px solid #ddd;
+            padding: 10px 12px;
+            font-size: 0.95rem;
+            transition: var(--transition);
+        }
+
+        .form-control:focus, .form-select:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 0.25rem rgba(52, 152, 219, 0.25);
+        }
+
+        .btn {
+            border-radius: var(--border-radius);
+            padding: 10px 20px;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .btn-primary {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+
+        .btn-primary:hover {
+            background-color: #2980b9;
+            border-color: #2980b9;
+        }
+
+        .btn-outline-secondary {
+            border-color: var(--secondary-color);
+            color: var(--secondary-color);
+        }
+
+        .btn-outline-secondary:hover {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        .date-inputs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            align-items: center;
+        }
+
+        .preview-container {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 30px;
+            margin-top: 20px;
+            overflow: auto;
+        }
+
+        .protocol-preview {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            padding: 20mm;
+            background: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            font-family: 'Times New Roman', serif;
+            font-size: 14pt;
+            line-height: 1.5;
+        }
+
+        .protocol-title {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20pt;
+            line-height: 1.2;
+        }
+
+        .protocol-subtitle {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 15pt;
+        }
+
+        .protocol-date {
+            text-align: justify;
+            margin-bottom: 20pt;
+        }
+
+        .protocol-section {
+            margin-bottom: 15pt;
+        }
+
+        .protocol-section-title {
+            font-weight: bold;
+            margin-bottom: 5pt;
+        }
+
+        .protocol-members {
+            white-space: pre-line;
+        }
+
+        .protocol-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15pt 0;
+            font-size: 12pt;
+        }
+
+        .protocol-table th, .protocol-table td {
+            border: 1px solid #000;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .protocol-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .protocol-table .number, .protocol-table .amount {
+            text-align: center;
+            width: 5%;
+        }
+
+        .protocol-table .budget, .protocol-table .group {
+            width: 10%;
+            text-align: center;
+        }
+
+        .protocol-signature {
+            margin-top: 30pt;
+        }
+
+        .protocol-signature-line {
+            display: inline-block;
+            width: 150px;
+            border-bottom: 1px solid #000;
+            margin: 0 10px;
         }
 
         .notification-container {
@@ -910,18 +871,22 @@ $studentCategories = getStudentCategories($pdo, $filters);
             top: 20px;
             right: 20px;
             z-index: 1050;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
 
         .notification {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            background-color: #fff;
+            padding: 15px 20px;
+            border-radius: var(--border-radius);
+            background: white;
+            box-shadow: var(--box-shadow);
             opacity: 0;
+            transform: translateX(100%);
+            transition: var(--transition);
+            max-width: 350px;
         }
 
         .notification.show {
@@ -935,30 +900,366 @@ $studentCategories = getStudentCategories($pdo, $filters);
         }
 
         .notification.success {
-            border-left: 5px solid #28a745;
+            border-left: 4px solid var(--success-color);
         }
 
         .notification.error {
-            border-left: 5px solid #dc3545;
+            border-left: 4px solid var(--danger-color);
         }
 
-        .notification .icon {
-            font-size: 1.3rem;
+        .notification-icon {
+            margin-right: 15px;
+            font-size: 1.5rem;
         }
 
-        .notification .message {
+        .notification-content {
             flex: 1;
-            font-weight: 500;
         }
 
-        .notification .close-btn {
+        .notification-close {
             background: none;
             border: none;
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             cursor: pointer;
-            color: #6c757d;
+            color: #7f8c8d;
+            margin-left: 10px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: #7f8c8d;
+        }
+
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: #bdc3c7;
+        }
+
+        .badge-counter {
+            background-color: var(--accent-color);
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            margin-left: 8px;
         }
     </style>
+</head>
+<body>
+    <div class="notification-container"></div>
+    
+    <div class="app-container">
+        <div class="app-header">
+            <h1>
+                <i class="bi bi-file-earmark-text"></i>
+                Система документооборота
+            </h1>
+        </div>
+
+        <div class="app-layout">
+            <div class="sidebar">
+                <div class="card">
+                    <div class="card-header" data-bs-toggle="collapse" data-bs-target="#templateEditor">
+                        <h3><i class="bi bi-pencil-square"></i> Редактирование шаблона</h3>
+                        <span class="toggle-icon"><i class="bi bi-chevron-down"></i></span>
+                    </div>
+                    <div class="card-body collapse show" id="templateEditor">
+                        <form method="POST" class="ajax-form" id="template-form">
+                            <div class="mb-3">
+                                <label for="SCHOOL_CODE" class="form-label">Школа</label>
+                                <select id="SCHOOL_CODE" name="template[SCHOOL_CODE]" class="form-select template-input" data-placeholder="SCHOOL_CODE">
+                                    <?php foreach ($schools as $school): ?>
+                                        <option value="<?php echo $school['code']; ?>" <?php echo ($templateVars['SCHOOL_CODE'] ?? 1) == $school['code'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($school['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <input type="hidden" id="SCHOOL" name="template[SCHOOL]" class="form-control template-input" data-placeholder="SCHOOL" value="<?php echo htmlspecialchars($templateVars['SCHOOL'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Дата</label>
+                                <div class="date-inputs">
+                                    <input type="number" id="DAY" name="template[DAY]" class="form-control template-input" data-placeholder="DAY" placeholder="День" min="1" max="31" value="<?php echo htmlspecialchars($templateVars['DAY'] ?? ''); ?>">
+                                    <select id="MONTH" name="template[MONTH]" class="form-select template-input" data-placeholder="MONTH">
+                                        <option value="">Месяц</option>
+                                        <?php foreach ($monthMap as $monthName => $monthNum): ?>
+                                            <option value="<?php echo $monthName; ?>" <?php echo ($templateVars['MONTH'] ?? '') == $monthName ? 'selected' : ''; ?>>
+                                                <?php echo $monthName; ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <select id="YEAR" name="template[YEAR]" class="form-select template-input" data-placeholder="YEAR">
+                                        <option value="">Год</option>
+                                        <?php foreach ($years as $year): ?>
+                                            <option value="<?php echo $year; ?>" <?php echo ($templateVars['YEAR'] ?? $defaultAcademicYear) == $year ? 'selected' : ''; ?>>
+                                                <?php echo $year; ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="button" id="set-current-date" class="btn btn-outline-secondary" title="Установить текущую дату">
+                                        <i class="bi bi-calendar-check"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="UNIVERSITY" class="form-label">ВУЗ</label>
+                                <input type="text" id="UNIVERSITY" name="template[UNIVERSITY]" class="form-control template-input" data-placeholder="UNIVERSITY" value="<?php echo htmlspecialchars($templateVars['UNIVERSITY'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="PROTOCOL_NUMBER" class="form-label">Номер протокола</label>
+                                <input type="text" id="PROTOCOL_NUMBER" name="template[PROTOCOL_NUMBER]" class="form-control template-input" data-placeholder="PROTOCOL_NUMBER" value="<?php echo htmlspecialchars($templateVars['PROTOCOL_NUMBER'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="CITY" class="form-label">Город</label>
+                                <input type="text" id="CITY" name="template[CITY]" class="form-control template-input" data-placeholder="CITY" value="<?php echo htmlspecialchars($templateVars['CITY'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="CHAIRPERSON" class="form-label">Председатель</label>
+                                <input type="text" id="CHAIRPERSON" name="template[CHAIRPERSON]" class="form-control template-input" data-placeholder="CHAIRPERSON" value="<?php echo htmlspecialchars($templateVars['CHAIRPERSON'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="CHAIR_DEGREE" class="form-label">Ученая степень председателя</label>
+                                <input type="text" id="CHAIR_DEGREE" name="template[CHAIR_DEGREE]" class="form-control template-input" data-placeholder="CHAIR_DEGREE" value="<?php echo htmlspecialchars($templateVars['CHAIR_DEGREE'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="MEMBERS" class="form-label">Члены комиссии</label>
+                                <textarea id="MEMBERS" name="template[MEMBERS]" class="form-control template-input" data-placeholder="MEMBERS" rows="4"><?php echo htmlspecialchars($templateVars['MEMBERS'] ?? ''); ?></textarea>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="SECRETARY" class="form-label">Секретарь</label>
+                                <input type="text" id="SECRETARY" name="template[SECRETARY]" class="form-control template-input" data-placeholder="SECRETARY" value="<?php echo htmlspecialchars($templateVars['SECRETARY'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="SECRETARY_DEGREE" class="form-label">Ученая степень секретаря</label>
+                                <input type="text" id="SECRETARY_DEGREE" name="template[SECRETARY_DEGREE]" class="form-control template-input" data-placeholder="SECRETARY_DEGREE" value="<?php echo htmlspecialchars($templateVars['SECRETARY_DEGREE'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="AGENDA" class="form-label">Повестка дня</label>
+                                <input type="text" id="AGENDA" name="template[AGENDA]" class="form-control template-input" data-placeholder="AGENDA" value="<?php echo htmlspecialchars($templateVars['AGENDA'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="LISTENED" class="form-label">Слушали</label>
+                                <textarea id="LISTENED" name="template[LISTENED]" class="form-control template-input" data-placeholder="LISTENED" rows="3"><?php echo htmlspecialchars($templateVars['LISTENED'] ?? ''); ?></textarea>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="SIGN_CHAIR" class="form-label">Подпись председателя</label>
+                                <input type="text" id="SIGN_CHAIR" name="template[SIGN_CHAIR]" class="form-control template-input" data-placeholder="SIGN_CHAIR" value="<?php echo htmlspecialchars($templateVars['SIGN_CHAIR'] ?? ''); ?>">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="SIGN_SECRETARY" class="form-label">Подпись секретаря</label>
+                                <input type="text" id="SIGN_SECRETARY" name="template[SIGN_SECRETARY]" class="form-control template-input" data-placeholder="SIGN_SECRETARY" value="<?php echo htmlspecialchars($templateVars['SIGN_SECRETARY'] ?? ''); ?>">
+                            </div>
+
+                            <input type="hidden" name="action" value="save_template">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-save"></i> Сохранить шаблон
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header" data-bs-toggle="collapse" data-bs-target="#generatorPanel">
+                        <h3><i class="bi bi-file-earmark-arrow-down"></i> Генерация протокола</h3>
+                        <span class="toggle-icon"><i class="bi bi-chevron-down"></i></span>
+                    </div>
+                    <div class="card-body collapse show" id="generatorPanel">
+                        <form method="POST" class="ajax-form" id="generate-protocol-form">
+                            <div class="mb-3">
+                                <label for="format" class="form-label">Формат документа</label>
+                                <select id="format" name="format" class="form-select">
+                                    <option value="word">Microsoft Word (.docx)</option>
+                                    <option value="pdf">PDF</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="filename" class="form-label">Имя файла</label>
+                                <input type="text" id="filename" name="filename" class="form-control" placeholder="protocol_7_<?php echo htmlspecialchars(extractYear($templateVars['YEAR'] ?? $defaultAcademicYear, 'second')); ?>.docx" value="protocol_7_<?php echo htmlspecialchars(extractYear($templateVars['YEAR'] ?? $defaultAcademicYear, 'second')); ?>.docx">
+                            </div>
+
+                            <input type="hidden" name="month" id="form-month" value="<?php echo htmlspecialchars($templateVars['MONTH'] ?? ''); ?>">
+                            <input type="hidden" name="year" id="form-year" value="<?php echo htmlspecialchars($templateVars['YEAR'] ?? $defaultAcademicYear); ?>">
+                            <input type="hidden" name="action" value="generate_protocol">
+                            
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-download"></i> Сгенерировать протокол
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content">
+                <div class="card">
+                    <div class="card-header" data-bs-toggle="collapse" data-bs-target="#protocolPreview">
+                        <h3>
+                            <i class="bi bi-eye"></i> Предпросмотр протокола
+                            <span class="badge-counter"><?php echo count($studentCategories); ?></span>
+                        </h3>
+                        <span class="toggle-icon"><i class="bi bi-chevron-down"></i></span>
+                    </div>
+                    <div class="card-body collapse show" id="protocolPreview">
+                        <div class="preview-container">
+                            <div class="protocol-preview">
+                                <div class="protocol-title">ПРОТОКОЛ № <span data-placeholder="PROTOCOL_NUMBER"><?php echo htmlspecialchars($templateVars['PROTOCOL_NUMBER'] ?? '{PROTOCOL_NUMBER}'); ?></span></div>
+                                <div class="protocol-subtitle">Заседания стипендиальной комиссии</div>
+                                <div class="protocol-subtitle"><span data-placeholder="SCHOOL"><?php echo htmlspecialchars($templateVars['SCHOOL'] ?? '{SCHOOL}'); ?></span></div>
+                                <div class="protocol-subtitle"><span data-placeholder="UNIVERSITY"><?php echo htmlspecialchars($templateVars['UNIVERSITY'] ?? '{UNIVERSITY}'); ?></span></div>
+                                
+                                <div class="protocol-date"><span data-placeholder="DATE"><?php echo htmlspecialchars($templateVars['DATE'] ?? '«DAY» MONTH YEAR г. г. CITY'); ?></span></div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Председатель комиссии:</div>
+                                    <div><span data-placeholder="CHAIRPERSON"><?php echo htmlspecialchars($templateVars['CHAIRPERSON'] ?? '{CHAIRPERSON}'); ?></span></div>
+                                </div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Члены комиссии:</div>
+                                    <div class="protocol-members"><span data-placeholder="MEMBERS"><?php echo nl2br(htmlspecialchars($templateVars['MEMBERS'] ?? '{MEMBERS}')); ?></span></div>
+                                </div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Секретарь комиссии:</div>
+                                    <div><span data-placeholder="SECRETARY"><?php echo htmlspecialchars($templateVars['SECRETARY'] ?? '{SECRETARY}'); ?></span></div>
+                                </div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Повестка дня:</div>
+                                    <div><span data-placeholder="AGENDA"><?php echo htmlspecialchars($templateVars['AGENDA'] ?? '{AGENDA}'); ?></span></div>
+                                </div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Слушали:</div>
+                                    <div><span data-placeholder="LISTENED"><?php echo htmlspecialchars($templateVars['LISTENED'] ?? '{LISTENED}'); ?></span></div>
+                                </div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Студенты (РФ):</div>
+                                    <table class="protocol-table rf-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="number">№</th>
+                                                <th>ФИО</th>
+                                                <th class="budget">Бюджет</th>
+                                                <th class="group">Группа</th>
+                                                <th>Основание</th>
+                                                <th class="amount">Сумма</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php
+                                            $rfStudents = array_filter($studentCategories, fn($s) => strtoupper($s['budget'] ?? '-') !== 'ХМАО');
+                                            if (empty($rfStudents)): ?>
+                                                <tr>
+                                                    <td class="number">1</td>
+                                                    <td>Нет данных</td>
+                                                    <td class="budget">-</td>
+                                                    <td class="group">-</td>
+                                                    <td>Нет студентов</td>
+                                                    <td class="amount">0</td>
+                                                </tr>
+                                            <?php else: ?>
+                                                <?php foreach (array_slice($rfStudents, 0, 30) as $index => $student): ?>
+                                                    <tr>
+                                                        <td class="number"><?php echo $index + 1; ?></td>
+                                                        <td><?php echo htmlspecialchars($student['full_name']); ?></td>
+                                                        <td class="budget"><?php echo htmlspecialchars($student['budget'] ?? '-'); ?></td>
+                                                        <td class="group"><?php echo htmlspecialchars($student['group_name']); ?></td>
+                                                        <td><?php echo htmlspecialchars($student['category_short'] ?? 'Не указано'); ?></td>
+                                                        <td class="amount"><?php echo htmlspecialchars($student['amount']); ?></td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            <?php endif; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                <div class="protocol-section">
+                                    <div class="protocol-section-title">Студенты (ХМАО):</div>
+                                    <table class="protocol-table hmao-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="number">№</th>
+                                                <th>ФИО</th>
+                                                <th class="budget">Бюджет</th>
+                                                <th class="group">Группа</th>
+                                                <th>Основание</th>
+                                                <th class="amount">Сумма</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php
+                                            $hmaoStudents = array_filter($studentCategories, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
+                                            if (empty($hmaoStudents)): ?>
+                                                <tr>
+                                                    <td class="number">1</td>
+                                                    <td>Нет данных</td>
+                                                    <td class="budget">-</td>
+                                                    <td class="group">-</td>
+                                                    <td>Нет студентов</td>
+                                                    <td class="amount">0</td>
+                                                </tr>
+                                            <?php else: ?>
+                                                <?php foreach (array_slice($hmaoStudents, 0, 3) as $index => $student): ?>
+                                                    <tr>
+                                                        <td class="number"><?php echo $index + 1; ?></td>
+                                                        <td><?php echo htmlspecialchars($student['full_name']); ?></td>
+                                                        <td class="budget"><?php echo htmlspecialchars($student['budget'] ?? '-'); ?></td>
+                                                        <td class="group"><?php echo htmlspecialchars($student['group_name']); ?></td>
+                                                        <td><?php echo htmlspecialchars($student['category_short'] ?? 'Не указано'); ?></td>
+                                                        <td class="amount"><?php echo htmlspecialchars($student['amount']); ?></td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            <?php endif; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                <div class="protocol-signature">
+                                    <div>Руководитель инженерной школы цифровых технологий</div>
+                                    <div>
+                                        <span><?php echo htmlspecialchars($templateVars['CHAIR_DEGREE'] ?? '{CHAIR_DEGREE}'); ?></span>
+                                        <span class="protocol-signature-line"></span>
+                                        <span data-placeholder="SIGN_CHAIR"><?php echo htmlspecialchars($templateVars['SIGN_CHAIR'] ?? '{SIGN_CHAIR}'); ?></span>
+                                    </div>
+                                </div>
+                                
+                                <div class="protocol-signature">
+                                    <div>Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе</div>
+                                    <div>
+                                        <span><?php echo htmlspecialchars($templateVars['SECRETARY_DEGREE'] ?? '{SECRETARY_DEGREE}'); ?></span>
+                                        <span class="protocol-signature-line"></span>
+                                        <span data-placeholder="SIGN_SECRETARY"><?php echo htmlspecialchars($templateVars['SIGN_SECRETARY'] ?? '{SIGN_SECRETARY}'); ?></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -969,8 +1270,10 @@ $studentCategories = getStudentCategories($pdo, $filters);
             let selectedMonth = $('#MONTH').val() || '<?php echo htmlspecialchars($templateVars['MONTH'] ?? ''); ?>';
             let selectedYear = $('#YEAR').val() || '<?php echo htmlspecialchars($templateVars['YEAR'] ?? $defaultAcademicYear); ?>';
 
+            // Initialize Bootstrap collapse with animation
             $('.card-header').click(function() {
-                $(this).closest('.card').toggleClass('collapsed');
+                const target = $(this).data('bs-target');
+                $(target).collapse('toggle');
             });
 
             function extractYear(academicYear, part = 'second') {
@@ -982,20 +1285,27 @@ $studentCategories = getStudentCategories($pdo, $filters);
             }
 
             function showNotification(message, type) {
+                const icon = type === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
                 const $notification = $(`
-                    <div class="notification ${type} show">
-                        <span class="icon">${type === 'success' ? '✅' : '❌'}</span>
-                        <span class="message">${message}</span>
-                        <button class="close-btn">×</button>
+                    <div class="notification ${type}">
+                        <div class="notification-icon">
+                            <i class="bi ${icon}"></i>
+                        </div>
+                        <div class="notification-content">${message}</div>
+                        <button class="notification-close">&times;</button>
                     </div>
                 `);
+                
                 $('.notification-container').append($notification);
+                setTimeout(() => $notification.addClass('show'), 10);
+                
                 setTimeout(() => {
-                    $notification.addClass('hide');
+                    $notification.removeClass('show');
                     setTimeout(() => $notification.remove(), 300);
                 }, 5000);
-                $notification.find('.close-btn').click(() => {
-                    $notification.addClass('hide');
+                
+                $notification.find('.notification-close').click(() => {
+                    $notification.removeClass('show');
                     setTimeout(() => $notification.remove(), 300);
                 });
             }
@@ -1005,16 +1315,17 @@ $studentCategories = getStudentCategories($pdo, $filters);
                     const placeholder = $(this).data('placeholder');
                     const value = $(this).val();
                     if (placeholder === 'MEMBERS') {
-                        $(`.preview [data-placeholder="${placeholder}"]`).html(value.replace(/\n/g, '<br>'));
+                        $(`.protocol-preview [data-placeholder="${placeholder}"]`).html(value.replace(/\n/g, '<br>'));
                     } else {
-                        $(`.preview [data-placeholder="${placeholder}"]`).text(value);
+                        $(`.protocol-preview [data-placeholder="${placeholder}"]`).text(value);
                     }
                 });
+                
                 const day = $('#DAY').val().trim() || 'DAY';
                 const month = $('#MONTH').val().trim() || 'MONTH';
                 const year = $('#YEAR').val().trim() || 'YEAR';
                 const city = $('#CITY').val().trim() || 'CITY';
-                $(`.preview [data-placeholder="DATE"]`).text(`«${day}» ${month} ${year} г. г. ${city}`);
+                $(`.protocol-preview [data-placeholder="DATE"]`).text(`«${day}» ${month} ${year} г. г. ${city}`);
 
                 const filterYear = extractYear(year, 'second');
 
@@ -1031,49 +1342,12 @@ $studentCategories = getStudentCategories($pdo, $filters);
                     success: function(data) {
                         studentsData = data;
                         updateStudentTables(studentsData);
+                        
+                        // Update counter badge
+                        $('.badge-counter').text(data.length);
                     },
                     error: function() {
                         showNotification('Ошибка загрузки студентов', 'error');
-                    }
-                });
-            }
-
-            function syncTemplateVars(vars) {
-                for (const [placeholder, value] of Object.entries(vars)) {
-                    const $input = $(`#${placeholder}`);
-                    if ($input.length) {
-                        $input.val(value);
-                    }
-                    if (placeholder === 'MEMBERS') {
-                        $(`.preview [data-placeholder="${placeholder}"]`).html(value.replace(/\n/g, '<br>'));
-                    } else if (placeholder === 'DATE') {
-                        $(`.preview [data-placeholder="${placeholder}"]`).text(value);
-                    } else {
-                        $(`.preview [data-placeholder="${placeholder}"]`).text(value);
-                    }
-                }
-                updatePreview();
-            }
-
-            function loadTemplateVars(schoolCode, academicYear) {
-                $.ajax({
-                    url: '',
-                    method: 'GET',
-                    data: {
-                        action: 'get_template_vars',
-                        school_code: schoolCode,
-                        academic_year: academicYear
-                    },
-                    dataType: 'json',
-                    success: function(response) {
-                        if (response.status === 'success' && response.template_vars) {
-                            syncTemplateVars(response.template_vars);
-                        } else {
-                            showNotification('Ошибка загрузки данных шаблона', 'error');
-                        }
-                    },
-                    error: function() {
-                        showNotification('Ошибка загрузки данных шаблона', 'error');
                     }
                 });
             }
@@ -1082,8 +1356,9 @@ $studentCategories = getStudentCategories($pdo, $filters);
                 const rfStudents = students.filter(s => (s.budget || '-').toUpperCase() !== 'ХМАО');
                 const hmaoStudents = students.filter(s => (s.budget || '-').toUpperCase() === 'ХМАО');
 
-                const $rfTableBody = $('.preview .rf-table tbody');
+                const $rfTableBody = $('.protocol-preview .rf-table tbody');
                 $rfTableBody.empty();
+                
                 if (rfStudents.length === 0) {
                     $rfTableBody.append(`
                         <tr>
@@ -1096,7 +1371,7 @@ $studentCategories = getStudentCategories($pdo, $filters);
                         </tr>
                     `);
                 } else {
-                    rfStudents.slice(0, 20).forEach((student, index) => {
+                    rfStudents.slice(0, 30).forEach((student, index) => {
                         const reason = student.category_short || 'Не указано';
                         $rfTableBody.append(`
                             <tr>
@@ -1111,8 +1386,9 @@ $studentCategories = getStudentCategories($pdo, $filters);
                     });
                 }
 
-                const $hmaoTableBody = $('.preview .hmao-table tbody');
+                const $hmaoTableBody = $('.protocol-preview .hmao-table tbody');
                 $hmaoTableBody.empty();
+                
                 if (hmaoStudents.length === 0) {
                     $hmaoTableBody.append(`
                         <tr>
@@ -1125,7 +1401,7 @@ $studentCategories = getStudentCategories($pdo, $filters);
                         </tr>
                     `);
                 } else {
-                    hmaoStudents.slice(0, 5).forEach((student, index) => {
+                    hmaoStudents.slice(0, 3).forEach((student, index) => {
                         const reason = student.category_short || 'Не указано';
                         $hmaoTableBody.append(`
                             <tr>
@@ -1145,27 +1421,44 @@ $studentCategories = getStudentCategories($pdo, $filters);
                 const schoolCode = $(this).val();
                 const schoolName = $(this).find('option:selected').text();
                 $('#SCHOOL').val(schoolName);
-                loadTemplateVars(schoolCode, selectedYear);
+                
+                $.ajax({
+                    url: '',
+                    method: 'GET',
+                    data: {
+                        action: 'get_template_vars',
+                        school_code: schoolCode,
+                        academic_year: selectedYear
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.status === 'success' && response.template_vars) {
+                            for (const [placeholder, value] of Object.entries(response.template_vars)) {
+                                const $input = $(`#${placeholder}`);
+                                if ($input.length) {
+                                    $input.val(value);
+                                }
+                            }
+                            updatePreview();
+                        }
+                    },
+                    error: function() {
+                        showNotification('Ошибка загрузки данных шаблона', 'error');
+                    }
+                });
             });
 
             $('#YEAR').on('change', function() {
                 selectedYear = $(this).val();
                 const schoolCode = $('#SCHOOL_CODE').val();
                 $('#form-year').val(selectedYear);
-                loadTemplateVars(schoolCode, selectedYear);
-                $('#template-form').submit();
+                updatePreview();
             });
 
             $('#MONTH').on('change', function() {
                 selectedMonth = $(this).val();
                 $('#form-month').val(selectedMonth);
                 updatePreview();
-                $('#template-form').submit();
-            });
-
-            $('#DAY').on('change', function() {
-                updatePreview();
-                $('#template-form').submit();
             });
 
             $('#set-current-date').on('click', function() {
@@ -1185,7 +1478,6 @@ $studentCategories = getStudentCategories($pdo, $filters);
                 $('#form-year').val(year);
 
                 updatePreview();
-                $('#template-form').submit();
             });
 
             function updateFilenameExtension() {
@@ -1196,12 +1488,10 @@ $studentCategories = getStudentCategories($pdo, $filters);
                 filename = filename.replace(/\.(docx|pdf)$/i, '');
                 const year = extractYear(selectedYear, 'second');
                 $filenameInput.val(filename + extension);
-                $('#filename').attr('placeholder', `3_Протокол_на_матпомощь_ноябрь_2024_г_.${extension}`);
+                $('#filename').attr('placeholder', `protocol_7_${year}.${extension}`);
             }
 
-            $('#format').on('change', function() {
-                updateFilenameExtension();
-            });
+            $('#format').on('change', updateFilenameExtension);
 
             $('#filename').on('input', function() {
                 const format = $('#format').val();
@@ -1210,18 +1500,17 @@ $studentCategories = getStudentCategories($pdo, $filters);
                 value = value.replace(/\.(docx|pdf)$/i, '').replace(/[^a-zA-Z0-9_\-\s]/g, '');
                 const year = extractYear(selectedYear, 'second');
                 if (value === '') {
-                    value = `3_Протокол_на_матпомощь_ноябрь_2024_г_`;
+                    value = `protocol_7_${year}`;
                 }
                 $(this).val(value + extension);
             });
-
-            updateFilenameExtension();
 
             $('.ajax-form').on('submit', function(e) {
                 e.preventDefault();
                 const $form = $(this);
                 const action = $form.find('input[name="action"]').val();
                 const formData = $form.serializeArray();
+                
                 $.ajax({
                     url: '',
                     method: 'POST',
@@ -1229,9 +1518,17 @@ $studentCategories = getStudentCategories($pdo, $filters);
                     dataType: 'json',
                     success: function(response) {
                         showNotification(response.message, response.status);
+                        
                         if (action === 'save_template' && response.template_vars) {
-                            syncTemplateVars(response.template_vars);
+                            for (const [placeholder, value] of Object.entries(response.template_vars)) {
+                                const $input = $(`#${placeholder}`);
+                                if ($input.length) {
+                                    $input.val(value);
+                                }
+                            }
+                            updatePreview();
                         }
+                        
                         if (action === 'generate_protocol' && response.file) {
                             const link = document.createElement('a');
                             link.href = `data:${response.contentType};base64,${response.file}`;
@@ -1247,266 +1544,39 @@ $studentCategories = getStudentCategories($pdo, $filters);
             });
 
             $('.template-input').on('change', function() {
-                $('#template-form').submit();
+                updatePreview();
             });
 
             $('.template-input').on('input change', function() {
                 const placeholder = $(this).data('placeholder');
                 const value = $(this).val();
+                
                 if (value.length > 1000) {
                     showNotification('Максимум 1000 символов', 'error');
                     $(this).val(value.substring(0, 1000));
+                    return;
                 }
+                
                 if (placeholder === 'MEMBERS') {
                     const lines = value.split('\n');
                     if (lines.length > 50) {
-                        showNotification(`Слишком много строк в поле "Члены комиссии"`, 'error');
+                        showNotification('Слишком много строк в поле "Члены комиссии"', 'error');
                         $(this).val(lines.slice(0, 50).join('\n'));
+                        return;
                     }
                 }
+                
                 updatePreview();
             });
 
+            // Initialize with current values
+            updateFilenameExtension();
             updatePreview();
+            
+            <?php foreach (getFlashMessages() as $flash): ?>
+                showNotification('<?php echo addslashes($flash['message']); ?>', '<?php echo $flash['type']; ?>');
+            <?php endforeach; ?>
         });
     </script>
-</head>
-<body>
-    <div class="notification-container"></div>
-    <div class="container">
-        <?php foreach (getFlashMessages() as $flash): ?>
-            <div class="notification <?php echo $flash['type']; ?>"><?php echo htmlspecialchars($flash['message']); ?></div>
-        <?php endforeach; ?>
-
-        <h2>Система документооборота</h2>
-
-        <div class="main-row">
-            <div class="sidebar">
-                <div class="card">
-                    <div class="card-header"><h4><span class="toggle-icon"></span>Редактирование шаблона</h4></div>
-                    <div class="card-body">
-                        <form method="POST" class="ajax-form" id="template-form">
-                            <?php
-                            $fields = [
-                                'UNIVERSITY' => 'ВУЗ',
-                                'SCHOOL_CODE' => 'Школа',
-                                'PROTOCOL_NUMBER' => 'Номер протокола',
-                                'CITY' => 'Город',
-                                'CHAIRPERSON' => 'Председатель',
-                                'CHAIR_DEGREE' => 'Ученая степень председателя',
-                                'MEMBERS' => 'Члены комиссии',
-                                'SECRETARY' => 'Секретарь',
-                                'SECRETARY_DEGREE' => 'Ученая степень секретаря',
-                                'AGENDA' => 'Повестка дня',
-                                'LISTENED' => 'Слушали',
-                                'SIGN_CHAIR' => 'Подпись председателя',
-                                'SIGN_SECRETARY' => 'Подпись секретаря'
-                            ];
-                            ?>
-                            <?php foreach ($fields as $placeholder => $label): ?>
-                                <?php if ($placeholder === 'CITY'): ?>
-                                    <div class="mb-2">
-                                        <label class="form-label">Дата</label>
-                                        <div class="row g-2 align-items-center">
-                                            <div class="col-3">
-                                                <input type="number" id="DAY" name="template[DAY]" class="form-control template-input" data-placeholder="DAY" placeholder="День" min="1" max="31" value="<?php echo htmlspecialchars($templateVars['DAY'] ?? ''); ?>">
-                                            </div>
-                                            <div class="col-3">
-                                                <select id="MONTH" name="template[MONTH]" class="form-select template-input" data-placeholder="MONTH">
-                                                    <option value="">Выберите месяц</option>
-                                                    <?php foreach ($monthMap as $monthName => $monthNum): ?>
-                                                        <option value="<?php echo $monthName; ?>" <?php echo ($templateVars['MONTH'] ?? '') == $monthName ? 'selected' : ''; ?>>
-                                                            <?php echo $monthName; ?>
-                                                        </option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-                                            <div class="col-3">
-                                                <select id="YEAR" name="template[YEAR]" class="form-select template-input" data-placeholder="YEAR">
-                                                    <option value="">Выберите год</option>
-                                                    <?php foreach ($years as $year): ?>
-                                                        <option value="<?php echo $year; ?>" <?php echo ($templateVars['YEAR'] ?? $defaultAcademicYear) == $year ? 'selected' : ''; ?>>
-                                                            <?php echo $year; ?>
-                                                        </option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-                                            <div class="col-3">
-                                                <button type="button" id="set-current-date" class="btn btn-outline-secondary btn-sm w-100">Текущая дата</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endif; ?>
-                                <div class="mb-2">
-                                    <label for="<?php echo $placeholder; ?>" class="form-label"><?php echo $label; ?></label>
-                                    <?php if ($placeholder === 'SCHOOL_CODE'): ?>
-                                        <select id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-select template-input" data-placeholder="<?php echo $placeholder; ?>">
-                                            <?php foreach ($schools as $school): ?>
-                                                <option value="<?php echo $school['code']; ?>" <?php echo ($templateVars['SCHOOL_CODE'] ?? 1) == $school['code'] ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($school['name']); ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                        <input type="hidden" id="SCHOOL" name="template[SCHOOL]" class="form-control template-input" data-placeholder="SCHOOL" value="<?php echo htmlspecialchars($templateVars['SCHOOL'] ?? ''); ?>">
-                                    <?php elseif ($placeholder === 'MEMBERS' || $placeholder === 'LISTENED'): ?>
-                                        <textarea id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-control template-input" data-placeholder="<?php echo $placeholder; ?>" rows="4"><?php echo htmlspecialchars($templateVars[$placeholder] ?? ''); ?></textarea>
-                                    <?php else: ?>
-                                        <input type="text" id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-control template-input" data-placeholder="<?php echo $placeholder; ?>" value="<?php echo htmlspecialchars($templateVars[$placeholder] ?? ''); ?>">
-                                    <?php endif; ?>
-                                </div>
-                            <?php endforeach; ?>
-                            <input type="hidden" name="action" value="save_template">
-                            <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-header"><h4><span class="toggle-icon"></span>Генерация протокола</h4></div>
-                    <div class="card-body">
-                        <form method="POST" class="ajax-form" id="generate-protocol-form">
-                            <div class="mb-2">
-                                <label for="format" class="form-label">Формат</label>
-                                <select id="format" name="format" class="form-select">
-                                    <option value="word" selected>Word (.docx)</option>
-                                    <option value="pdf">PDF</option>
-                                </select>
-                            </div>
-                            <div class="mb-2">
-                                <label for="filename" class="form-label">Имя файла</label>
-                                <input type="text" id="filename" name="filename" class="form-control" placeholder="3_Протокол_на_матпомощь_ноябрь_2024_г_.docx" value="3_Протокол_на_матпомощь_ноябрь_2024_г_.docx">
-                            </div>
-                            <input type="hidden" name="month" id="form-month" value="<?php echo htmlspecialchars($templateVars['MONTH'] ?? ''); ?>">
-                            <input type="hidden" name="year" id="form-year" value="<?php echo htmlspecialchars($templateVars['YEAR'] ?? $defaultAcademicYear); ?>">
-                            <input type="hidden" name="action" value="generate_protocol">
-                            <button type="submit" class="btn btn-primary btn-sm">Сгенерировать</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <div class="content">
-                <div class="card collapsed">
-                    <div class="card-header"><h4><span class="toggle-icon"></span>Предпросмотр протокола</h4></div>
-                    <div class="card-body">
-                        <div class="preview-container">
-                            <div class="preview">
-                                <h1>ПРОТОКОЛ № <span data-placeholder="PROTOCOL_NUMBER"><?php echo htmlspecialchars($templateVars['PROTOCOL_NUMBER'] ?? '{PROTOCOL_NUMBER}'); ?></span></h1>
-                                <h2>Заседания стипендиальной комиссии</h2>
-                                <h2><span data-placeholder="SCHOOL"><?php echo htmlspecialchars($templateVars['SCHOOL'] ?? '{SCHOOL}'); ?></span></h2>
-                                <h2><span data-placeholder="UNIVERSITY"><?php echo htmlspecialchars($templateVars['UNIVERSITY'] ?? '{UNIVERSITY}'); ?></span></h2>
-                                <div class="date-city">
-                                    <span data-placeholder="DATE"><?php echo htmlspecialchars($templateVars['DATE'] ?? '«DAY» MONTH YEAR г. г. CITY'); ?></span>
-                                </div>
-                                <p class="section-title">Председатель комиссии:</p>
-                                <p><span data-placeholder="CHAIRPERSON"><?php echo htmlspecialchars($templateVars['CHAIRPERSON'] ?? '{CHAIRPERSON}'); ?></span></p>
-                                <p class="section-title">Члены комиссии:</p>
-                                <p class="members"><span data-placeholder="MEMBERS"><?php echo nl2br(htmlspecialchars($templateVars['MEMBERS'] ?? '{MEMBERS}')); ?></span></p>
-                                <p class="section-title">Секретарь комиссии:</p>
-                                <p><span data-placeholder="SECRETARY"><?php echo htmlspecialchars($templateVars['SECRETARY'] ?? '{SECRETARY}'); ?></span></p>
-                                <p class="section-title">Повестка дня:</p>
-                                <p><span data-placeholder="AGENDA"><?php echo htmlspecialchars($templateVars['AGENDA'] ?? '{AGENDA}'); ?></span></p>
-                                <p class="section-title">Слушали:</p>
-                                <p><span data-placeholder="LISTENED"><?php echo htmlspecialchars($templateVars['LISTENED'] ?? '{LISTENED}'); ?></span></p>
-
-                                <p class="section-title">Студенты (РФ):</p>
-                                <table class="rf-table">
-                                    <thead>
-                                        <tr>
-                                            <th>№</th>
-                                            <th>ФИО</th>
-                                            <th>Бюджет</th>
-                                            <th>Группа</th>
-                                            <th>Основание</th>
-                                            <th>Сумма</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php
-                                        $rfStudents = array_filter($studentCategories, fn($s) => strtoupper($s['budget'] ?? '-') !== 'ХМАО');
-                                        if (empty($rfStudents)): ?>
-                                            <tr>
-                                                <td class="number">1</td>
-                                                <td>Нет данных</td>
-                                                <td class="budget">-</td>
-                                                <td class="group">-</td>
-                                                <td>Нет студентов</td>
-                                                <td class="amount">0</td>
-                                            </tr>
-                                        <?php else: ?>
-                                            <?php foreach (array_slice($rfStudents, 0, 20) as $index => $student): ?>
-                                                <tr>
-                                                    <td class="number"><?php echo $index + 1; ?></td>
-                                                    <td><?php echo htmlspecialchars($student['full_name']); ?></td>
-                                                    <td class="budget"><?php echo htmlspecialchars($student['budget'] ?? '-'); ?></td>
-                                                    <td class="group"><?php echo htmlspecialchars($student['group_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($student['category_short'] ?? 'Не указано'); ?></td>
-                                                    <td class="amount"><?php echo htmlspecialchars($student['amount']); ?></td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        <?php endif; ?>
-                                    </tbody>
-                                </table>
-
-                                <p class="section-title">Студенты (ХМАО):</p>
-                                <table class="hmao-table">
-                                    <thead>
-                                        <tr>
-                                            <th>№</th>
-                                            <th>ФИО</th>
-                                            <th>Бюджет</th>
-                                            <th>Группа</th>
-                                            <th>Основание</th>
-                                            <th>Сумма</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php
-                                        $hmaoStudents = array_filter($studentCategories, fn($s) => strtoupper($s['budget'] ?? '-') === 'ХМАО');
-                                        if (empty($hmaoStudents)): ?>
-                                            <tr>
-                                                <td class="number">1</td>
-                                                <td>Нет данных</td>
-                                                <td class="budget">-</td>
-                                                <td class="group">-</td>
-                                                <td>Нет студентов</td>
-                                                <td class="amount">0</td>
-                                            </tr>
-                                        <?php else: ?>
-                                            <?php foreach (array_slice($hmaoStudents, 0, 5) as $index => $student): ?>
-                                                <tr>
-                                                    <td class="number"><?php echo $index + 1; ?></td>
-                                                    <td><?php echo htmlspecialchars($student['full_name']); ?></td>
-                                                    <td class="budget"><?php echo htmlspecialchars($student['budget'] ?? '-'); ?></td>
-                                                    <td class="group"><?php echo htmlspecialchars($student['group_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($student['category_short'] ?? 'Не указано'); ?></td>
-                                                    <td class="amount"><?php echo htmlspecialchars($student['amount']); ?></td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        <?php endif; ?>
-                                    </tbody>
-                                </table>
-
-                                <div class="signatures">
-                                    <p>Руководитель инженерной школы цифровых технологий</p>
-                                    <div class="signature">
-                                        <span><?php echo htmlspecialchars($templateVars['CHAIR_DEGREE'] ?? '{CHAIR_DEGREE}'); ?></span>
-                                        <span class="signature-line"></span>
-                                        <span data-placeholder="SIGN_CHAIR"><?php echo htmlspecialchars($templateVars['SIGN_CHAIR'] ?? '{SIGN_CHAIR}'); ?></span>
-                                    </div>
-                                    <p>Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе</p>
-                                    <div class="signature">
-                                        <span><?php echo htmlspecialchars($templateVars['SECRETARY_DEGREE'] ?? '{SECRETARY_DEGREE}'); ?></span>
-                                        <span class="signature-line"></span>
-                                        <span data-placeholder="SIGN_SECRETARY"><?php echo htmlspecialchars($templateVars['SIGN_SECRETARY'] ?? '{SIGN_SECRETARY}'); ?></span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </body>
 </html>

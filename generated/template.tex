@@ -1,0 +1,50 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage{geometry}
+\geometry{top=2cm, bottom=2cm, left=3cm, right=1.5cm}
+\usepackage{longtable}
+\usepackage{setspace}
+\onehalfspacing
+\begin{document}
+\begin{center}
+\textbf{ПРОТОКОЛ № {PROTOCOL_NUMBER}} \\
+\textbf{Заседания стипендиальной комиссии} \\
+\textbf{{SCHOOL}} \\
+\textbf{{UNIVERSITY}} \\
+\end{center}
+\vspace{0.5cm}
+{DATE} \hfill \\
+\vspace{1cm}
+\textbf{Председатель комиссии:} {CHAIRPERSON} \\
+\textbf{Члены комиссии:} \\
+{MEMBERS_LATEX} \\
+\textbf{Секретарь комиссии:} {SECRETARY} \\
+\textbf{Повестка дня:} {AGENDA} \\
+\textbf{Слушали:} {LISTENED} \\
+\vspace{0.5cm}
+\textbf{Решили:} \\
+Оказать материальную поддержку следующим нуждающимся студентам: \\
+\vspace{0.5cm}
+\begin{longtable}{|c|p{5cm}|c|c|p{5cm}|c|}
+\hline
+№ & ФИО & Бюджет & Группа & Основание & Сумма \\
+\hline
+{STUDENT_LIST_RF}
+\hline
+\end{longtable}
+\vspace{0.5cm}
+\begin{longtable}{|c|p{5cm}|c|c|p{5cm}|c|}
+\hline
+№ & ФИО & Бюджет & Группа & Основание & Сумма \\
+\hline
+{STUDENT_LIST_HMAO}
+\hline
+\end{longtable}
+\vspace{1cm}
+Руководитель инженерной школы цифровых технологий \\
+{CHAIR_DEGREE} \hfill \underline{\hspace{4cm}} \hfill {SIGN_CHAIR} \\
+\vspace{0.5cm}
+Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе \\
+{SECRETARY_DEGREE} \hfill \underline{\hspace{4cm}} \hfill {SIGN_SECRETARY} \\
+\end{document}
