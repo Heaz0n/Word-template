@@ -1,27 +1,5 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('error_reporting', E_ALL);
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/php_errors.log');
-
-header('Content-Type: text/html; charset=utf-8');
-session_start();
-
-// Database configuration
-$host = '127.0.0.1';
-$dbname = 'SystemDocument';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    header('Content-Type: application/json', true, 500);
-    echo json_encode(['status' => 'error', 'message' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
-    exit;
-}
+require_once 'db_config.php';
 
 // Include PhpWord for document generation
 require_once 'vendor/autoload.php';

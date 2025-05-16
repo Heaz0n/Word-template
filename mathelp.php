@@ -1,67 +1,9 @@
 <?php
-// Подключение к базе данных
-$host = 'localhost';
-$dbname = 'SystemDocument';
-$username = 'root';
-$password = '';
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-} catch (PDOException $e) {
-    die("Ошибка подключения к базе данных: " . $e->getMessage());
-}
+// Подключение конфигурации базы данных
+require_once 'db_config.php';
 
 // Инициализация переменной для уведомлений
 $notification = '';
-
-// Обработка экспорта в Excel
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export_excel'])) {
-    try {
-        $stmt = $pdo->query("SELECT * FROM categories ORDER BY CAST(number AS UNSIGNED)");
-        $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        require 'vendor/autoload.php';
-        
-        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
-        
-        $sheet->setCellValue('A1', 'ID');
-        $sheet->setCellValue('B1', '№ п/п');
-        $sheet->setCellValue('C1', 'Категория');
-        $sheet->setCellValue('D1', 'Категория (сокращенно)');
-        $sheet->setCellValue('E1', 'Перечень подтверждающих документов');
-        $sheet->setCellValue('F1', 'Периодичность выплат');
-        $sheet->setCellValue('G1', 'Максимальная сумма (руб.)');
-        
-        $row = 2;
-        foreach ($categories as $category) {
-            $sheet->setCellValue('A' . $row, $category['id'] ?? '');
-            $sheet->setCellValue('B' . $row, $category['number'] ?? '');
-            $sheet->setCellValue('C' . $row, $category['category_name'] ?? '');
-            $sheet->setCellValue('D' . $row, $category['category_short'] ?? '');
-            $sheet->setCellValue('E' . $row, str_replace("\n", ", ", $category['documents_list'] ?? ''));
-            $sheet->setCellValue('F' . $row, $category['payment_frequency'] ?? '');
-            $sheet->setCellValue('G' . $row, $category['max_amount'] ?? '');
-            $row++;
-        }
-        
-        foreach (range('A', 'G') as $column) {
-            $sheet->getColumnDimension($column)->setAutoSize(true);
-        }
-        
-        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment;filename="categories_export.xlsx"');
-        header('Cache-Control: max-age=0');
-        
-        $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-        $writer->save('php://output');
-        exit;
-        
-    } catch (PDOException $e) {
-        die("Ошибка при экспорте данных: " . $e->getMessage());
-    }
-}
 
 // Функция для проверки последовательности ID
 function checkSequentialIds($pdo) {
@@ -288,9 +230,6 @@ try {
             display: none;
             animation: fadeIn 0.3s ease-out;
         }
-        .export-buttons {
-            margin-bottom: 20px;
-        }
     </style>
 </head>
 <body>
@@ -316,12 +255,6 @@ try {
                     <i class="bi bi-plus-circle"></i> Добавить
                 </button>
             </div>
-        </div>
-        
-        <div class="export-buttons mb-4">
-            <a href="?export_excel=1" class="btn btn-primary">
-                <i class="bi bi-file-earmark-excel"></i> Экспорт в Excel
-            </a>
         </div>
         
         <p class="mb-4">Ниже представлен перечень категорий и документов, необходимых для получения материальной поддержки.</p>

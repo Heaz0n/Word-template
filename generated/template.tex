@@ -1,50 +1,97 @@
 \documentclass[a4paper,12pt]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[russian]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
 \usepackage{geometry}
-\geometry{top=2cm, bottom=2cm, left=3cm, right=1.5cm}
-\usepackage{longtable}
-\usepackage{setspace}
-\onehalfspacing
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{parskip}
+
+% Setting margins to match PHP Word settings
+\geometry{
+  left=3cm,
+  right=1.5cm,
+  top=2cm,
+  bottom=2cm
+}
+
+% Define table column types for centered columns
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+% Set default paragraph spacing and line spacing
+\setlength{\parindent}{0pt}
+\linespread{1.0}
+
 \begin{document}
+
+% Title section
 \begin{center}
-\textbf{ПРОТОКОЛ № {PROTOCOL_NUMBER}} \\
-\textbf{Заседания стипендиальной комиссии} \\
-\textbf{{SCHOOL}} \\
-\textbf{{UNIVERSITY}} \\
+  \textbf{ПРОТОКОЛ № {PROTOCOL_NUMBER}} \\
+  \vspace{0.5em}
+  \textbf{Заседания стипендиальной комиссии} \\
+  \vspace{0.5em}
+  \textbf{{SCHOOL}} \\
+  \vspace{0.5em}
+  \textbf{{UNIVERSITY}} \\
 \end{center}
-\vspace{0.5cm}
-{DATE} \hfill \\
-\vspace{1cm}
-\textbf{Председатель комиссии:} {CHAIRPERSON} \\
+
+% Date and city
+\vspace{1em}
+{{DATE}} \\
+\vspace{1em}
+
+% Commission details
+\textbf{Председатель комиссии:} \\
+{{CHAIRPERSON}} \\
+\vspace{0.5em}
+
 \textbf{Члены комиссии:} \\
 {MEMBERS_LATEX} \\
-\textbf{Секретарь комиссии:} {SECRETARY} \\
-\textbf{Повестка дня:} {AGENDA} \\
-\textbf{Слушали:} {LISTENED} \\
-\vspace{0.5cm}
-\textbf{Решили:} \\
-Оказать материальную поддержку следующим нуждающимся студентам: \\
-\vspace{0.5cm}
-\begin{longtable}{|c|p{5cm}|c|c|p{5cm}|c|}
-\hline
-№ & ФИО & Бюджет & Группа & Основание & Сумма \\
-\hline
-{STUDENT_LIST_RF}
-\hline
-\end{longtable}
-\vspace{0.5cm}
-\begin{longtable}{|c|p{5cm}|c|c|p{5cm}|c|}
-\hline
-№ & ФИО & Бюджет & Группа & Основание & Сумма \\
-\hline
-{STUDENT_LIST_HMAO}
-\hline
-\end{longtable}
-\vspace{1cm}
+\vspace{0.5em}
+
+\textbf{Секретарь комиссии:} \\
+{{SECRETARY}} \\
+\vspace{0.5em}
+
+\textbf{Повестка дня:} \\
+{{AGENDA}} \\
+\vspace{0.5em}
+
+\textbf{Слушали:} \\
+{{LISTENED}} \\
+\vspace{1em}
+
+% RF Students Table
+\textbf{Студенты (РФ):} \\
+\begin{tabular}{|C{0.5cm}|L{5cm}|C{2cm}|C{2cm}|L{5cm}|C{2cm}|}
+  \hline
+  \textbf{№} & \textbf{ФИО} & \textbf{Бюджет} & \textbf{Группа} & \textbf{Основание} & \textbf{Сумма} \\
+  \hline
+  {STUDENT_LIST_RF}
+  \hline
+\end{tabular}
+\vspace{1em}
+
+% HMAO Students Table
+\textbf{Студенты (ХМАО):} \\
+\begin{tabular}{|C{0.5cm}|L{5cm}|C{2cm}|C{2cm}|L{5cm}|C{2cm}|}
+  \hline
+  \textbf{№} & \textbf{ФИО} & \textbf{Бюджет} & \textbf{Группа} & \textbf{Основание} & \textbf{Сумма} \\
+  \hline
+  {STUDENT_LIST_HMAO}
+  \hline
+\end{tabular}
+\vspace{2em}
+
+% Signatures
 Руководитель инженерной школы цифровых технологий \\
-{CHAIR_DEGREE} \hfill \underline{\hspace{4cm}} \hfill {SIGN_CHAIR} \\
-\vspace{0.5cm}
+{{CHAIR_DEGREE}} \hspace{2cm} \underline{\hspace{4cm}} \hspace{0.5cm} {{SIGN_CHAIR}} \\
+\vspace{1.5em}
+
 Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе \\
-{SECRETARY_DEGREE} \hfill \underline{\hspace{4cm}} \hfill {SIGN_SECRETARY} \\
+{{SECRETARY_DEGREE}} \hspace{2cm} \underline{\hspace{4cm}} \hspace{0.5cm} {{SIGN_SECRETARY}}
+
 \end{document}

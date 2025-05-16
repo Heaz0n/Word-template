@@ -1,24 +1,11 @@
 <?php
-session_start();
+
+// Include database configuration
+require_once 'db_config.php';
 
 // Генерация CSRF-токена
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-
-// Подключение к базе данных
-$host = 'localhost';
-$dbname = 'SystemDocument';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    $_SESSION['notification'] = ['type' => 'error', 'message' => 'Ошибка подключения к базе данных: ' . $e->getMessage()];
-    header('Location: schools.php');
-    exit;
 }
 
 // Функция для обработки действий со школами

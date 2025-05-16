@@ -1,6 +1,17 @@
 {
+    "name": "aleksandr/word-template",
+    "autoload": {
+        "psr-4": {
+            "Aleksandr\\WordTemplate\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Heaz0n",
+            "email": "116496715+Heaz0n@users.noreply.github.com"
+        }
+    ],
     "require": {
-        "phpoffice/phpspreadsheet": "^4.2",
-        "phpoffice/phpword": "^1.3"
-    }
+    "phpoffice/phpspreadsheet": "^2.0"
+}
 }

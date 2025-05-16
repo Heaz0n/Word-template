@@ -1,0 +1,97 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{geometry}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{parskip}
+
+% Setting margins to match PHP Word settings
+\geometry{
+  left=3cm,
+  right=1.5cm,
+  top=2cm,
+  bottom=2cm
+}
+
+% Define table column types for centered columns
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+% Set default paragraph spacing and line spacing
+\setlength{\parindent}{0pt}
+\linespread{1.0}
+
+\begin{document}
+
+% Title section
+\begin{center}
+  \textbf{ПРОТОКОЛ № } \\
+  \vspace{0.5em}
+  \textbf{Заседания стипендиальной комиссии} \\
+  \vspace{0.5em}
+  \textbf{Инженерная школа цифровых технологий} \\
+  \vspace{0.5em}
+  \textbf{вфы} \\
+\end{center}
+
+% Date and city
+\vspace{1em}
+{«15» сентября 2025/2026 г. г. } \\
+\vspace{1em}
+
+% Commission details
+\textbf{Председатель комиссии:} \\
+{} \\
+\vspace{0.5em}
+
+\textbf{Члены комиссии:} \\
+Нет данных \\
+\vspace{0.5em}
+
+\textbf{Секретарь комиссии:} \\
+{} \\
+\vspace{0.5em}
+
+\textbf{Повестка дня:} \\
+{} \\
+\vspace{0.5em}
+
+\textbf{Слушали:} \\
+{} \\
+\vspace{1em}
+
+% RF Students Table
+\textbf{Студенты (РФ):} \\
+\begin{tabular}{|C{0.5cm}|L{5cm}|C{2cm}|C{2cm}|L{5cm}|C{2cm}|}
+  \hline
+  \textbf{№} & \textbf{ФИО} & \textbf{Бюджет} & \textbf{Группа} & \textbf{Основание} & \textbf{Сумма} \\
+  \hline
+  1. & Нет данных & - & - & Нет студентов & 0 \\
+  \hline
+\end{tabular}
+\vspace{1em}
+
+% HMAO Students Table
+\textbf{Студенты (ХМАО):} \\
+\begin{tabular}{|C{0.5cm}|L{5cm}|C{2cm}|C{2cm}|L{5cm}|C{2cm}|}
+  \hline
+  \textbf{№} & \textbf{ФИО} & \textbf{Бюджет} & \textbf{Группа} & \textbf{Основание} & \textbf{Сумма} \\
+  \hline
+  1. & Нет данных & - & - & Нет студентов & 0 \\
+  \hline
+\end{tabular}
+\vspace{2em}
+
+% Signatures
+Руководитель инженерной школы цифровых технологий \\
+{} \hspace{2cm} \underline{\hspace{4cm}} \hspace{0.5cm} {} \\
+\vspace{1.5em}
+
+Заместитель руководителя инженерной школы цифровых технологий по воспитательной работе \\
+{} \hspace{2cm} \underline{\hspace{4cm}} \hspace{0.5cm} {}
+
+\end{document}

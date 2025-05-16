@@ -1,30 +1,13 @@
 <?php
-session_start();
-
-// Генерация CSRF-токена
-if (!isset($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-
-// Подключение к базе данных
-$host = '127.0.0.1';
-$dbname = 'SystemDocument';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;port=3306;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    $_SESSION['notification'] = ['type' => 'error', 'message' => 'Ошибка подключения к базе данных: ' . $e->getMessage()];
-    header('Location: main-group.php');
-    exit;
-}
+require_once 'db_config.php';
 
 // Подключение PhpSpreadsheet
 require 'vendor/autoload.php';
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 // Временная метка последнего обновления
 $lastUpdateTimestamp = $_SESSION['last_update_timestamp'] ?? 0;
 
