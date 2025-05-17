@@ -1,7 +1,5 @@
-
 <?php
 require_once 'db_config.php';
-
 
 // Helper functions
 function setFlashMessage($message, $type = 'success') {
@@ -45,7 +43,7 @@ function getTemplateVariables($pdo, $school_code = 1, $academic_year = '2024/202
         $requiredPlaceholders = [
             'UNIVERSITY', 'SCHOOL', 'SCHOOL_CODE', 'PROTOCOL_NUMBER', 'DATE', 'DAY', 
             'MONTH', 'YEAR', 'CITY', 'CHAIRPERSON', 'CHAIR_DEGREE', 'MEMBERS', 
-            'SECRETARY', 'SECRETARY_DEGREE', 'AGENDA', 'LISTENED', 'DECISION', 
+            'SECRETARY', 'SECRETARY_DEGREE', 'AGENDA', 'LISTENED', 
             'SIGN_CHAIR', 'SIGN_SECRETARY'
         ];
         
@@ -171,36 +169,6 @@ function getStudentCategories($pdo, $filters = []) {
     }
 }
 
-function getAllStudents($pdo, $search = '') {
-    $query = "
-        SELECT 
-            s.id,
-            s.full_name,
-            s.budget,
-            g.group_name
-        FROM Students s
-        JOIN Groups g ON s.group_id = g.id
-        WHERE 1=1
-    ";
-    $params = [];
-
-    if ($search) {
-        $query .= " AND s.full_name LIKE ?";
-        $params[] = '%' . $search . '%';
-    }
-
-    $query .= " ORDER BY s.full_name";
-
-    try {
-        $stmt = $pdo->prepare($query);
-        $stmt->execute($params);
-        return $stmt->fetchAll();
-    } catch (PDOException $e) {
-        error_log("Ошибка в getAllStudents: " . $e->getMessage());
-        return [];
-    }
-}
-
 // Initialize data
 $monthMap = [
     'января' => 1, 'февраля' => 2, 'марта' => 3, 'апреля' => 4, 'мая' => 5,
@@ -214,7 +182,7 @@ $templateVars = getTemplateVariables($pdo, 1, $defaultAcademicYear);
 
 // Action handlers
 $actions = [
-    'save_template' => function() use ($pdo, $defaultAcademicYear, $templateVars) {
+    'save_template' => function() use ($pdo, $defaultAcademicYear, $templateVars, $monthMap) {
         if (!isset($_POST['template']) || !is_array($_POST['template'])) {
             header('Content-Type: application/json', true, 400);
             echo json_encode(['status' => 'error', 'message' => 'Неверные данные шаблона']);
@@ -229,11 +197,12 @@ $actions = [
             $pdo->beginTransaction();
 
             foreach ($_POST['template'] as $placeholder => $value) {
-                if (preg_match('/^[A-Z_]+$/', $placeholder) && strlen($value) <= 1000) {
-                    if ($placeholder === 'MEMBERS' || $placeholder === 'LISTENED' || $placeholder === 'DECISION') {
-                        $value = preg_replace('/\s+/', ' ', trim($value));
-                        $value = preg_replace('/[\r\n]+/', "\n", $value);
+                if (preg_match('/^[A-Z_]+$/', $placeholder) && $placeholder !== 'DECISION') {
+                    $maxLength = ($placeholder === 'MEMBERS') ? 16000 : 1000;
+                    if (strlen($value) > $maxLength) {
+                        $value = substr($value, 0, $maxLength);
                     }
+                    $value = trim($value);
                     $updatedVars[$placeholder] = $value;
 
                     $stmt = $pdo->prepare("
@@ -264,8 +233,8 @@ $actions = [
                 $day = trim($_POST['template']['DAY']);
                 $month = trim($_POST['template']['MONTH']);
                 $year = trim($_POST['template']['YEAR']);
-                if ($day && $month && $year) {
-                    $date = "«{$day}» {$month} {$year} г. г. {$templateVars['CITY']}";
+                if ($day && $month && $year && in_array($month, array_keys($monthMap))) {
+                    $date = "«{$day}» {$month} {$year} г.";
                     $updatedVars['DATE'] = $date;
                     $stmt = $pdo->prepare("
                         INSERT INTO TemplateVariables (school_code, academic_year, placeholder, value)
@@ -298,6 +267,13 @@ $actions = [
         $format = $_POST['format'] ?? 'pdf';
         $month = trim($_POST['month'] ?? '');
         $year = trim($_POST['year'] ?? $defaultAcademicYear);
+        $day = trim($_POST['day'] ?? '1'); // Default day if not provided
+
+        if (!in_array($month, array_keys($monthMap))) {
+            header('Content-Type: application/json', true, 400);
+            echo json_encode(['status' => 'error', 'message' => 'Неверный месяц']);
+            exit;
+        }
 
         $fileYear = extractYear($year, 'second');
         $extension = $format === 'word' ? 'docx' : 'pdf';
@@ -314,6 +290,11 @@ $actions = [
         ];
         $students = getStudentCategories($pdo, $filters);
         $templateVars = getTemplateVariables($pdo, 1, $year);
+        // Update templateVars with the provided date components
+        $templateVars['DAY'] = $day;
+        $templateVars['MONTH'] = $month;
+        $templateVars['YEAR'] = $fileYear;
+        $templateVars['DATE'] = "«{$day}» {$month} {$fileYear} г.";
 
         if ($format === 'word') {
             require_once 'vendor/autoload.php';
@@ -332,9 +313,9 @@ $actions = [
             $section->addText($templateVars['SCHOOL'], ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 120]);
             $section->addText($templateVars['UNIVERSITY'], ['bold' => true, 'size' => 14], ['alignment' => 'center', 'spaceAfter' => 240]);
 
- $run = $section->addTextRun(['spaceAfter' => 240, 'alignment' => 'both']);
-$run->addText("«{$templateVars['DAY']}» {$templateVars['MONTH']} {$templateVars['YEAR']} г.", ['size' => 12]);
-$run->addText("\tг. {$templateVars['CITY']}", ['size' => 12]);
+            $run = $section->addTextRun(['spaceAfter' => 240, 'alignment' => 'both']);
+            $run->addText("{$templateVars['DATE']}", ['size' => 12]);
+            $run->addText("\tг. {$templateVars['CITY']}", ['size' => 12]);
             $section->addTextBreak(1, ['size' => 12], ['spaceAfter' => 240]);
 
             foreach ([
@@ -342,8 +323,7 @@ $run->addText("\tг. {$templateVars['CITY']}", ['size' => 12]);
                 ['Члены комиссии:', $templateVars['MEMBERS'], true],
                 ['Секретарь комиссии:', $templateVars['SECRETARY']],
                 ['Повестка дня:', $templateVars['AGENDA']],
-                ['Слушали:', $templateVars['LISTENED']],
-                ['Решили:', "Оказать материальную поддержку следующим нуждающимся студентам:\n" . $templateVars['DECISION']]
+                ['Слушали:', $templateVars['LISTENED']]
             ] as $item) {
                 $section->addText($item[0], ['bold' => true, 'size' => 12], ['spaceAfter' => 60]);
                 $text = $item[1];
@@ -489,13 +469,12 @@ $run->addText("\tг. {$templateVars['CITY']}", ['size' => 12]);
                 }
             }
             $templateVars['MEMBERS_LATEX'] = $membersLatex ?: 'Нет данных';
-            $templateVars['DECISION'] = "Оказать материальную поддержку следующим нуждающимся студентам:\n" . $templateVars['DECISION'];
 
             $latexContent = str_replace(['{STUDENT_LIST_RF}', '{STUDENT_LIST_HMAO}', '{MEMBERS_LATEX}'], 
                                        [rtrim($studentListRf, "\n"), rtrim($studentListHmao, "\n"), $templateVars['MEMBERS_LATEX']], 
                                        $templateContent);
             foreach ($templateVars as $placeholder => $value) {
-                if ($placeholder !== 'MEMBERS_LATEX') {
+                if ($placeholder !== 'MEMBERS_LATEX' && $placeholder !== 'DECISION') {
                     $latexContent = str_replace("{{$placeholder}}", addslashes($value), $latexContent);
                 }
             }
@@ -531,74 +510,6 @@ $run->addText("\tг. {$templateVars['CITY']}", ['size' => 12]);
             exit;
         }
     },
-    'add_student_category' => function() use ($pdo, $defaultAcademicYear) {
-        $student_id = $_POST['student_id'] ?? null;
-        $category_id = $_POST['category_id'] ?? null;
-        $academic_year = $_POST['academic_year'] ?? $defaultAcademicYear;
-
-        if (!$student_id || !$category_id || !$academic_year) {
-            header('Content-Type: application/json', true, 400);
-            echo json_encode(['status' => 'error', 'message' => 'Недостаточно данных']);
-            exit;
-        }
-
-        try {
-            $stmt = $pdo->prepare("INSERT INTO StudentCategories (student_id, category_id, academic_year) VALUES (?, ?, ?)");
-            $stmt->execute([$student_id, $category_id, $academic_year]);
-            header('Content-Type: application/json');
-            echo json_encode(['status' => 'success', 'message' => 'Студент добавлен в категорию']);
-            exit;
-        } catch (PDOException $e) {
-            header('Content-Type: application/json', true, 500);
-            echo json_encode(['status' => 'error', 'message' => 'Ошибка добавления студента']);
-            exit;
-        }
-    },
-    'update_student' => function() use ($pdo) {
-        $student_id = $_POST['student_id'] ?? null;
-        $full_name = trim($_POST['full_name'] ?? '');
-        $budget = trim($_POST['budget'] ?? '');
-        $group_name = trim($_POST['group_name'] ?? '');
-
-        if (!$student_id || !$full_name || !$group_name) {
-            header('Content-Type: application/json', true, 400);
-            echo json_encode(['status' => 'error', 'message' => 'Недостаточно данных']);
-            exit;
-        }
-
-        try {
-            $stmt = $pdo->prepare("UPDATE Students SET full_name = ?, budget = ? WHERE id = ?");
-            $stmt->execute([$full_name, $budget, $student_id]);
-
-            $stmt = $pdo->prepare("SELECT id FROM Groups WHERE group_name = ?");
-            $stmt->execute([$group_name]);
-            $group = $stmt->fetch();
-
-            if ($group) {
-                $stmt = $pdo->prepare("UPDATE Students SET group_id = ? WHERE id = ?");
-                $stmt->execute([$group['id'], $student_id]);
-            } else {
-                header('Content-Type: application/json', true, 400);
-                echo json_encode(['status' => 'error', 'message' => 'Группа не найдена']);
-                exit;
-            }
-
-            header('Content-Type: application/json');
-            echo json_encode(['status' => 'success', 'message' => 'Данные студента обновлены']);
-            exit;
-        } catch (PDOException $e) {
-            header('Content-Type: application/json', true, 500);
-            echo json_encode(['status' => 'error', 'message' => 'Ошибка обновления данных']);
-            exit;
-        }
-    },
-    'get_students' => function() use ($pdo) {
-        $search = $_GET['search'] ?? '';
-        $students = getAllStudents($pdo, $search);
-        header('Content-Type: solvapplication/json');
-        echo json_encode($students);
-        exit;
-    },
     'get_student_categories' => function() use ($pdo, $defaultAcademicYear) {
         $filters = [
             'search' => $_GET['search'] ?? '',
@@ -614,6 +525,7 @@ $run->addText("\tг. {$templateVars['CITY']}", ['size' => 12]);
         $school_code = $_GET['school_code'] ?? 1;
         $academic_year = $_GET['academic_year'] ?? $defaultAcademicYear;
         $templateVars = getTemplateVariables($pdo, $school_code, $academic_year);
+        unset($templateVars['DECISION']);
         header('Content-Type: application/json');
         echo json_encode(['status' => 'success', 'template_vars' => $templateVars]);
         exit;
@@ -648,7 +560,7 @@ $categories_js = array_map(function($category) {
 
 $filters = [
     'search' => trim($_GET['search'] ?? ''),
-    'month' => trim($_GET['month'] ?? ($templateVars['MONTH'] ?? '')),
+    'month course' => trim($_GET['month'] ?? ($templateVars['MONTH'] ?? '')),
     'year' => trim($_GET['year'] ?? ($templateVars['YEAR'] ?? $defaultAcademicYear))
 ];
 $studentCategories = getStudentCategories($pdo, $filters);
@@ -858,20 +770,20 @@ $studentCategories = getStudentCategories($pdo, $filters);
             line-height: 1;
         }
 
-.preview .date-city {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 1em 0;
-    font-size: 12pt;
-    line-height: 1;
-}
-.preview .date-city .date-part {
-    flex: 0 0 auto;
-}
-.preview .date-city .city-part {
-    flex: 0 0 auto;
-}
+        .preview .date-city {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 1em 0;
+            font-size: 12pt;
+            line-height: 1;
+        }
+        .preview .date-city .date-part {
+            flex: 0 0 auto;
+        }
+        .preview .date-city .city-part {
+            flex: 0 0 auto;
+        }
 
         .preview table {
             width: 100%;
@@ -1048,73 +960,15 @@ $studentCategories = getStudentCategories($pdo, $filters);
         .modal-body textarea {
             border-radius: 6px;
         }
-
-        .student-search-container {
-            position: relative;
-        }
-
-        .student-search-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background-color: #fff;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            max-height: 200px;
-            overflow-y: auto;
-            z-index: 1000;
-            display: none;
-        }
-
-        .student-search-dropdown.show {
-            display: block;
-        }
-
-        .student-search-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .student-search-item:hover {
-            background-color: #f1f3f5;
-        }
-
-        .student-search-item .student-full-name {
-            font-weight: 600;
-            color: #007bff;
-        }
-
-        .student-search-item .student-group {
-            color: #495057;
-        }
-
-        .student-search-item .student-budget {
-            color: #6c757d;
-            font-size: 0.9rem;
-        }
-
-        .student-row {
-            cursor: pointer;
-        }
-
-        .student-row:hover {
-            background-color: #f1f3f5;
-        }
     </style>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         $(document).ready(function() {
             const monthMap = <?php echo json_encode($monthMap); ?>;
-            const categories = <?php echo json_encode($categories_js); ?>;
             let studentsData = <?php echo json_encode($studentCategories); ?>;
             let selectedMonth = $('#MONTH').val() || '<?php echo htmlspecialchars($templateVars['MONTH'] ?? ''); ?>';
             let selectedYear = $('#YEAR').val() || '<?php echo htmlspecialchars($templateVars['YEAR'] ?? $defaultAcademicYear); ?>';
-            const defaultCategoryId = <?php echo json_encode($categories[0]['id'] ?? 1); ?>;
-            const defaultAcademicYear = <?php echo json_encode($defaultAcademicYear); ?>;
 
             $('.card-header').click(function() {
                 $(this).closest('.card').toggleClass('collapsed');
@@ -1150,23 +1004,24 @@ $studentCategories = getStudentCategories($pdo, $filters);
             function updatePreview() {
                 $('.template-input').each(function() {
                     const placeholder = $(this).data('placeholder');
-                    let value = $(this).val();
-                    if (placeholder === 'DECISION') {
-                        value = "Оказать материальную поддержку следующим нуждающимся студентам:\n" + value;
-                    }
-                    if (placeholder === 'MEMBERS' || placeholder === 'DECISION') {
+                    const value = $(this).val();
+                    if (placeholder === 'MEMBERS' || placeholder === 'LISTENED') {
                         $(`.preview [data-placeholder="${placeholder}"]`).html(value.replace(/\n/g, '<br>'));
                     } else {
                         $(`.preview [data-placeholder="${placeholder}"]`).text(value);
                     }
                 });
-                const day = $('#DAY').val().trim() || 'DAY';
-                const month = $('#MONTH').val().trim() || 'MONTH';
-                const year = $('#YEAR').val().trim() || 'YEAR';
-                const city = $('#CITY').val().trim() || 'CITY';
-                $(`.preview [data-placeholder="DATE"]`).html(`<span class="date-day">«${day}»</span> ${month} ${year} г. г. ${city}`);
-
+                const day = $('#DAY').val().trim() || '1';
+                const month = $('#MONTH').val().trim() || Object.keys(monthMap)[0];
+                const year = $('#YEAR').val().trim() || '<?php echo htmlspecialchars($defaultAcademicYear); ?>';
+                const city = $('#CITY').val().trim() || '<?php echo htmlspecialchars($templateVars['CITY'] ?? ''); ?>';
                 const filterYear = extractYear(year, 'second');
+                $(`.preview [data-placeholder="DATE"]`).html(`<span class="date-day">«${day}»</span> ${month} ${filterYear} г.`);
+
+                // Update hidden form inputs for protocol generation
+                $('#form-month').val(month);
+                $('#form-year').val(year);
+                $('#form-day').val(day);
 
                 $.ajax({
                     url: '',
@@ -1194,16 +1049,18 @@ $studentCategories = getStudentCategories($pdo, $filters);
                     if ($input.length) {
                         $input.val(value);
                     }
-                    if (placeholder === 'MEMBERS' || placeholder === 'DECISION') {
-                        let displayValue = value;
-                        if (placeholder === 'DECISION') {
-                            displayValue = "Оказать материальную поддержку следующим нуждающимся студентам:\n" + value;
-                        }
-                        $(`.preview [data-placeholder="${placeholder}"]`).html(displayValue.replace(/\n/g, '<br>'));
+                    if (placeholder === 'MEMBERS' || placeholder === 'LISTENED') {
+                        $(`.preview [data-placeholder="${placeholder}"]`).html(value.replace(/\n/g, '<br>'));
                     } else {
                         $(`.preview [data-placeholder="${placeholder}"]`).text(value);
                     }
                 }
+                // Ensure MONTH and YEAR are synchronized
+                selectedMonth = vars['MONTH'] || Object.keys(monthMap)[0];
+                selectedYear = vars['YEAR'] || '<?php echo htmlspecialchars($defaultAcademicYear); ?>';
+                $('#form-month').val(selectedMonth);
+                $('#form-year').val(selectedYear);
+                $('#form-day').val(vars['DAY'] || '1');
                 updatePreview();
             }
 
@@ -1305,11 +1162,16 @@ $studentCategories = getStudentCategories($pdo, $filters);
                 const schoolCode = $('#SCHOOL_CODE').val();
                 $('#form-year').val(selectedYear);
                 loadTemplateVars(schoolCode, selectedYear);
+                updatePreview();
             });
 
             $('#MONTH').on('change', function() {
                 selectedMonth = $(this).val();
                 $('#form-month').val(selectedMonth);
+                updatePreview();
+            });
+
+            $('#DAY, #MONTH, #YEAR, #CITY').on('input change', function() {
                 updatePreview();
             });
 
@@ -1378,80 +1240,19 @@ $studentCategories = getStudentCategories($pdo, $filters);
             $('.template-input').on('input change', function() {
                 const placeholder = $(this).data('placeholder');
                 const value = $(this).val();
-                if (value.length > 1000) {
-                    showNotification('Максимум 1000 символов', 'error');
-                    $(this).val(value.substring(0, 1000));
+                const maxLength = (placeholder === 'MEMBERS') ? 16000 : 1000;
+                if (value.length > maxLength) {
+                    showNotification(`Максимум ${maxLength} символов`, 'error');
+                    $(this).val(value.substring(0, maxLength));
                 }
-                if (placeholder === 'MEMBERS' || placeholder === 'DECISION') {
+                if (placeholder === 'LISTENED') {
                     const lines = value.split('\n');
                     if (lines.length > 50) {
-                        showNotification(`Слишком много строк в поле "${placeholder === 'MEMBERS' ? 'Члены комиссии' : 'Решили'}"`, 'error');
+                        showNotification(`Слишком много строк в поле "Слушали"`, 'error');
                         $(this).val(lines.slice(0, 50).join('\n'));
                     }
                 }
                 updatePreview();
-            });
-
-            function loadStudents(search = '') {
-                $.ajax({
-                    url: '',
-                    method: 'GET',
-                    data: { action: 'get_students', search: search },
-                    dataType: 'json',
-                    success: function(students) {
-                        const $tbody = $('#student-selection-table');
-                        $tbody.empty();
-                        students.forEach(student => {
-                            $tbody.append(`
-                                <tr class="student-row" data-student-id="${student.id}">
-                                    <td>${$('<div/>').text(student.full_name).html()}</td>
-                                    <td>${$('<div/>').text(student.group_name).html()}</td>
-                                    <td>${$('<div/>').text(student.budget || '-').html()}</td>
-                                </tr>
-                            `);
-                        });
-                    },
-                    error: function() {
-                        showNotification('Ошибка загрузки студентов', 'error');
-                    }
-                });
-            }
-
-            $('#selectStudentsModal').on('shown.bs.modal', function() {
-                loadStudents();
-            });
-
-            $('#student-search').on('input', function() {
-                const search = $(this).val().trim();
-                loadStudents(search);
-            });
-
-            $(document).on('click', '.student-row', function() {
-                const studentId = $(this).data('student-id');
-                $.ajax({
-                    url: '',
-                    method: 'POST',
-                    data: {
-                        action: 'add_student_category',
-                        student_id: studentId,
-                        category_id: defaultCategoryId,
-                        academic_year: defaultAcademicYear
-                    },
-                    dataType: 'json',
-                    success: function(response) {
-                        showNotification(response.message, response.status);
-                        if (response.status === 'success') {
-                            $.get('', { action: 'get_student_categories', month: selectedMonth, year: extractYear(selectedYear, 'second') }, function(data) {
-                                studentsData = data;
-                                updatePreview();
-                            }, 'json');
-                            $('#selectStudentsModal').modal('hide');
-                        }
-                    },
-                    error: function() {
-                        showNotification('Ошибка добавления студента', 'error');
-                    }
-                });
             });
 
             updatePreview();
@@ -1486,7 +1287,6 @@ $studentCategories = getStudentCategories($pdo, $filters);
                                 'SECRETARY_DEGREE' => 'Ученая степень секретаря',
                                 'AGENDA' => 'Повестка дня',
                                 'LISTENED' => 'Слушали',
-                                'DECISION' => 'Решили',
                                 'SIGN_CHAIR' => 'Подпись председателя',
                                 'SIGN_SECRETARY' => 'Подпись секретаря'
                             ];
@@ -1497,7 +1297,7 @@ $studentCategories = getStudentCategories($pdo, $filters);
                                         <label class="form-label">Дата</label>
                                         <div class="row g-2">
                                             <div class="col-4">
-                                                <input type="number" id="DAY" name="template[DAY]" class="form-control template-input" data-placeholder="DAY" placeholder="День" min="1" max="31" value="<?php echo htmlspecialchars($templateVars['DAY'] ?? ''); ?>">
+                                                <input type="number" id="DAY" name="template[DAY]" class="form-control template-input" data-placeholder="DAY" placeholder="День" min="1" max="31" value="<?php echo htmlspecialchars($templateVars['DAY'] ?? '1'); ?>">
                                             </div>
                                             <div class="col-4">
                                                 <select id="MONTH" name="template[MONTH]" class="form-select template-input" data-placeholder="MONTH">
@@ -1533,8 +1333,8 @@ $studentCategories = getStudentCategories($pdo, $filters);
                                             <?php endforeach; ?>
                                         </select>
                                         <input type="hidden" id="SCHOOL" name="template[SCHOOL]" class="form-control template-input" data-placeholder="SCHOOL" value="<?php echo htmlspecialchars($templateVars['SCHOOL'] ?? ''); ?>">
-                                    <?php elseif ($placeholder === 'MEMBERS' || $placeholder === 'LISTENED' || $placeholder === 'DECISION'): ?>
-                                        <textarea id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-control template-input" data-placeholder="<?php echo $placeholder; ?>" rows="4"><?php echo htmlspecialchars($templateVars[$placeholder] ?? ''); ?></textarea>
+                                    <?php elseif ($placeholder === 'MEMBERS' || $placeholder === 'LISTENED'): ?>
+                                        <textarea id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-control template-input" data-placeholder="<?php echo $placeholder; ?>" rows="<?php echo $placeholder === 'MEMBERS' ? 10 : 6; ?>"><?php echo htmlspecialchars($templateVars[$placeholder] ?? ''); ?></textarea>
                                     <?php else: ?>
                                         <input type="text" id="<?php echo $placeholder; ?>" name="template[<?php echo $placeholder; ?>]" class="form-control template-input" data-placeholder="<?php echo $placeholder; ?>" value="<?php echo htmlspecialchars($templateVars[$placeholder] ?? ''); ?>">
                                     <?php endif; ?>
@@ -1563,18 +1363,10 @@ $studentCategories = getStudentCategories($pdo, $filters);
                             </div>
                             <input type="hidden" name="month" id="form-month" value="<?php echo htmlspecialchars($templateVars['MONTH'] ?? ''); ?>">
                             <input type="hidden" name="year" id="form-year" value="<?php echo htmlspecialchars($templateVars['YEAR'] ?? $defaultAcademicYear); ?>">
+                            <input type="hidden" name="day" id="form-day" value="<?php echo htmlspecialchars($templateVars['DAY'] ?? '1'); ?>">
                             <input type="hidden" name="action" value="generate_protocol">
                             <button type="submit" class="btn btn-primary btn-sm">Сгенерировать</button>
                         </form>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-header"><h4><span class="toggle-icon"></span>Добавить студента</h4></div>
-                    <div class="card-body">
-                        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#selectStudentsModal">
-                            Выбрать студента
-                        </button>
                     </div>
                 </div>
             </div>
@@ -1590,7 +1382,7 @@ $studentCategories = getStudentCategories($pdo, $filters);
                                 <h2><span data-placeholder="SCHOOL"><?php echo htmlspecialchars($templateVars['SCHOOL'] ?? '{SCHOOL}'); ?></span></h2>
                                 <h2><span data-placeholder="UNIVERSITY"><?php echo htmlspecialchars($templateVars['UNIVERSITY'] ?? '{UNIVERSITY}'); ?></span></h2>
                                 <div class="date-city">
-                                    <span class="date-part"><span class="date-day">«<?php echo htmlspecialchars($templateVars['DAY'] ?? 'DAY'); ?>»</span> <?php echo htmlspecialchars($templateVars['MONTH'] ?? 'MONTH'); ?> <?php echo htmlspecialchars($templateVars['YEAR'] ?? 'YEAR'); ?> г.</span>
+                                    <span class="date-part"><span class="date-day">«<?php echo htmlspecialchars($templateVars['DAY'] ?? '1'); ?>»</span> <?php echo htmlspecialchars($templateVars['MONTH'] ?? 'MONTH'); ?> <?php echo htmlspecialchars(extractYear($templateVars['YEAR'] ?? $defaultAcademicYear, 'second')); ?> г.</span>
                                     <span class="city-part"><?php echo htmlspecialchars($templateVars['CITY'] ?? '{CITY}'); ?></span>
                                 </div>
                                 <p class="section-title">Председатель комиссии:</p>
@@ -1602,9 +1394,7 @@ $studentCategories = getStudentCategories($pdo, $filters);
                                 <p class="section-title">Повестка дня:</p>
                                 <p><span data-placeholder="AGENDA"><?php echo htmlspecialchars($templateVars['AGENDA'] ?? '{AGENDA}'); ?></span></p>
                                 <p class="section-title">Слушали:</p>
-                                <p><span data-placeholder="LISTENED"><?php echo htmlspecialchars($templateVars['LISTENED'] ?? '{LISTENED}'); ?></span></p>
-                                <p class="section-title">Решили:</p>
-                                <p><span data-placeholder="DECISION"><?php echo nl2br(htmlspecialchars("Оказать материальную поддержку следующим нуждающимся студентам:\n" . ($templateVars['DECISION'] ?? '{DECISION}'))); ?></span></p>
+                                <p><span data-placeholder="LISTENED"><?php echo nl2br(htmlspecialchars($templateVars['LISTENED'] ?? '{LISTENED}')); ?></span></p>
 
                                 <p class="section-title">Студенты (РФ):</p>
                                 <table class="rf-table">
@@ -1700,38 +1490,6 @@ $studentCategories = getStudentCategories($pdo, $filters);
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Modal for Selecting Students -->
-        <div class="modal fade no-backdrop" id="selectStudentsModal" tabindex="-1" aria-labelledby="selectStudentsModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="selectStudentsModalLabel">Выбор студента</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label for="student-search" class="form-label">Поиск студента</label>
-                            <input type="text" id="student-search" class="form-control" placeholder="Введите ФИО">
-                        </div>
-                        <table class="table table-bordered">
-                            <thead>
-                                <tr>
-                                    <th>ФИО</th>
-                                    <th>Группа</th>
-                                    <th>Бюджет</th>
-                                </tr>
-                            </thead>
-                            <tbody id="student-selection-table">
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
                     </div>
                 </div>
             </div>

@@ -128,12 +128,11 @@ function handleGroupAction($pdo, $action, $data) {
     return ['type' => 'error', 'message' => 'Неизвестное действие'];
 }
 
-// Функция для обработки действий со студентами
 function handleStudentAction($pdo, $action, $data) {
     $full_name = trim($data['full_name'] ?? '');
     $phone = trim($data['phone'] ?? '');
     $telegram = trim($data['telegram'] ?? '');
-    $budget = trim($data['budget'] ?? ''); // Новое поле
+    $budget = trim($data['budget'] ?? '');
     $group_id = trim($data['group_id'] ?? '');
 
     // Если group_id не передан, но есть selected_group_id в сессии, используем его
@@ -227,9 +226,60 @@ function handleStudentAction($pdo, $action, $data) {
                 'student' => $updatedStudent
             ];
         } elseif ($action === 'delete') {
-            // ... (без изменений)
+            $id = $data['id'] ?? '';
+            $group_id = $data['group_id'] ?? '';
+            if (empty($id)) {
+                return ['type' => 'error', 'message' => 'ID студента обязателен'];
+            }
+            if (empty($group_id)) {
+                return ['type' => 'error', 'message' => 'ID группы обязателен'];
+            }
+
+            // Проверка существования студента
+            $stmt = $pdo->prepare("SELECT full_name FROM Students WHERE id = ? AND group_id = ?");
+            $stmt->execute([$id, $group_id]);
+            $studentName = $stmt->fetchColumn();
+            if (!$studentName) {
+                return ['type' => 'error', 'message' => 'Студент не найден'];
+            }
+
+            $stmt = $pdo->prepare("DELETE FROM Students WHERE id = ? AND group_id = ?");
+            $stmt->execute([$id, $group_id]);
+
+            return [
+                'type' => 'success',
+                'message' => "Студент '$studentName' успешно удален",
+                'group_id' => $group_id
+            ];
         } elseif ($action === 'delete_all') {
-            // ... (без изменений)
+            $group_id = $data['group_id'] ?? '';
+            if (empty($group_id)) {
+                return ['type' => 'error', 'message' => 'ID группы обязателен'];
+            }
+
+            // Проверка существования группы
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM `Groups` WHERE id = ?");
+            $stmt->execute([$group_id]);
+            if ($stmt->fetchColumn() == 0) {
+                return ['type' => 'error', 'message' => 'Группа не существует'];
+            }
+
+            // Проверка наличия студентов в группе
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM Students WHERE group_id = ?");
+            $stmt->execute([$group_id]);
+            $studentCount = $stmt->fetchColumn();
+            if ($studentCount == 0) {
+                return ['type' => 'error', 'message' => 'В группе нет студентов для удаления'];
+            }
+
+            $stmt = $pdo->prepare("DELETE FROM Students WHERE group_id = ?");
+            $stmt->execute([$group_id]);
+
+            return [
+                'type' => 'success',
+                'message' => "Все студенты группы успешно удалены",
+                'group_id' => $group_id
+            ];
         } elseif ($action === 'upload') {
             if (!isset($_FILES['excel_file']) || $_FILES['excel_file']['error'] != UPLOAD_ERR_OK) {
                 return ['type' => 'error', 'message' => 'Ошибка загрузки файла'];
@@ -362,10 +412,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-cache');
 
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        echo json_encode(['type' => 'error', 'message' => 'Недействительный CSRF-токен']);
-        exit;
-    }
 
     $action = $_POST['action'];
 
@@ -1326,7 +1372,7 @@ function submitGroupForm(event) {
         } else {
             showNotification(data.message, 'success');
             closeModal('add-group-modal');
-            fetchGroups(); // Refresh groups after adding
+            checkForUpdates(); // Refresh groups and students
             updateGroupSelect('group_id');
         }
     })
@@ -1353,7 +1399,7 @@ function submitEditGroupForm(event) {
         } else {
             showNotification(data.message, 'success');
             closeModal('edit-group-modal');
-            fetchGroups(); // Refresh groups after editing
+            checkForUpdates(); // Refresh groups and students
             updateGroupSelect('group_id');
         }
     })
@@ -1385,9 +1431,7 @@ function submitStudentForm(event) {
         } else {
             showNotification(data.message, 'success');
             closeModal('add-student-modal');
-            if (selectedGroupId) {
-                fetchStudents(selectedGroupId); // Refresh students for selected group
-            }
+            checkForUpdates(); // Refresh groups and students
             resetStudentForm('add-student-modal');
         }
     })
@@ -1416,9 +1460,7 @@ function submitEditStudentForm(event) {
         } else {
             showNotification(data.message, 'success');
             closeModal('edit-student-modal');
-            if (selectedGroupId) {
-                fetchStudents(selectedGroupId); // Refresh students for selected group
-            }
+            checkForUpdates(); // Refresh groups and students
         }
     })
     .catch(error => {
@@ -1450,9 +1492,7 @@ function submitUploadStudentsForm(event) {
         } else {
             showNotification(data.message, 'success');
             closeModal('upload-students-modal');
-            if (selectedGroupId) {
-                fetchStudents(selectedGroupId); // Refresh students for selected group
-            }
+            checkForUpdates(); // Refresh groups and students
             form.reset();
         }
     })
@@ -1514,7 +1554,7 @@ function confirmDeleteGroup(id) {
                 showNotification(data.message, 'error');
             } else {
                 showNotification(data.message, 'success');
-                fetchGroups(); // Refresh groups after deletion
+                checkForUpdates(); // Refresh groups and students
                 if (selectedGroupId === id) {
                     selectedGroupId = '';
                     document.getElementById('selected-group-name').textContent = '';
@@ -1544,13 +1584,13 @@ function confirmDeleteStudent(id, group_id) {
                 showNotification(data.message, 'error');
             } else {
                 showNotification(data.message, 'success');
+                checkForUpdates(); // Refresh groups and students
                 if (group_id === selectedGroupId) {
-                    // Найти и удалить строку студента из таблицы
                     const row = document.querySelector(`#students-table-body tr td button[onclick*="confirmDeleteStudent('${id}', '${group_id}')"]`)?.closest('tr');
                     if (row) {
                         row.style.transition = 'opacity 0.3s';
                         row.style.opacity = '0';
-                        setTimeout(() => row.remove(), 300); // Удалить после анимации
+                        setTimeout(() => row.remove(), 300);
                     }
                 }
             }
@@ -1580,13 +1620,37 @@ function confirmDeleteAllStudents() {
                 showNotification(data.message, 'error');
             } else {
                 showNotification(data.message, 'success');
-                fetchStudents(selectedGroupId); // Refresh students for selected group
+                checkForUpdates(); // Refresh groups and students
             }
         })
         .catch(error => {
             showNotification('Ошибка при удалении всех студентов: ' + error.message, 'error');
         });
     }
+}
+
+function checkForUpdates() {
+    const data = new FormData();
+    data.append('action', 'check_updates');
+    data.append('group_id', selectedGroupId || '');
+    data.append('csrf_token', '<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>');
+
+    fetch('main-group.php', {
+        method: 'POST',
+        body: new URLSearchParams(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.type === 'error') {
+            showNotification(data.message, 'error');
+            return;
+        }
+        updateGroupsTable(data.groups);
+        updateStudentsTable(data.students);
+    })
+    .catch(error => {
+        showNotification('Ошибка при проверке обновлений: ' + error.message, 'error');
+    });
 }
 
 function updateDirectionSelect(selectId) {
@@ -1695,7 +1759,7 @@ function fetchStudents(groupId) {
     studentsTableBody.innerHTML = '';
 
     if (!groupId) {
-        studentsTableBody.innerHTML = '<tr><td colspan="5">Выберите группу для отображения студентов</td></tr>';
+        studentsTableBody.innerHTML = '<tr><td colspan="6">Выберите группу для отображения студентов</td></tr>';
         document.getElementById('selected-group-name').textContent = '';
         return;
     }
@@ -1837,7 +1901,6 @@ function resetStudentForm(modalId) {
                 }
             });
         }
-        // Сброс поля budget
         const budgetSelect = document.getElementById(modalId === 'add-student-modal' ? 'budget' : 'edit-budget');
         if (budgetSelect) {
             budgetSelect.value = '';
@@ -1863,7 +1926,7 @@ function handleGroupClick(event) {
             showNotification(data.message, 'error');
             return;
         }
-        fetchStudents(selectedGroupId); // Fetch students for selected group
+        fetchStudents(selectedGroupId);
     })
     .catch(error => {
         showNotification('Ошибка при выборе группы: ' + error.message, 'error');
@@ -1908,7 +1971,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
-        // Initialize filters and load initial groups
         if (schoolFilter.value) {
             selectedSchoolCode = schoolFilter.value;
             fetchDirections(selectedSchoolCode).then(() => {
@@ -1924,7 +1986,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // Restore selected group if exists
         if (selectedGroupId) {
             const selectedGroupRow = document.querySelector(`#groups-table-body tr[data-group-id="${selectedGroupId}"]`);
             if (selectedGroupRow) {
@@ -1935,15 +1996,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Removed setInterval(checkForUpdates, 5000); to disable periodic updates
-
-    // Initialize clickable-name event listeners
     document.querySelectorAll('.clickable-name').forEach(element => {
         element.addEventListener('click', handleGroupClick);
     });
 });
 
-// Close modals when clicking outside
 window.addEventListener('click', function(event) {
     document.querySelectorAll('.modal').forEach(modal => {
         if (event.target === modal) {
@@ -1952,7 +2009,6 @@ window.addEventListener('click', function(event) {
     });
 });
 
-// Prevent form submission on Enter key except in textareas
 document.querySelectorAll('form').forEach(form => {
     form.addEventListener('keypress', function(e) {
         if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
